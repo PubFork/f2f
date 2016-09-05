@@ -13,7 +13,7 @@ File::File(BlockStorage & blockStorage)
   , m_blockStorage(blockStorage)
   , m_openMode(OpenMode::read_write)
   , m_inode()
-  , m_fileBlocks(blockStorage, m_inode.treeRootBlockIndex, m_inodeTreeRootIsDirty, true)
+  , m_fileBlocks(blockStorage, m_inode, m_inodeTreeRootIsDirty, true)
   , m_position(0)
 {
   checkOpenMode();
@@ -26,7 +26,7 @@ File::File(BlockStorage & blockStorage, BlockAddress const & inodeAddress, OpenM
   , m_blockStorage(blockStorage)
   , m_openMode(openMode)
   , m_inodeAddress(inodeAddress)
-  , m_fileBlocks(blockStorage, m_inode.treeRootBlockIndex, m_inodeTreeRootIsDirty)
+  , m_fileBlocks(blockStorage, m_inode, m_inodeTreeRootIsDirty)
   , m_position(0)
 {
   checkOpenMode();

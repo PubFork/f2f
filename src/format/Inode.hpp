@@ -35,13 +35,31 @@ struct InodeHeader
   uint64_t fileSize;
   uint64_t blocksCount;
   uint64_t creationTime;
-  
-  static const int DirectRangesSize = 10;
-  uint16_t rangesCount; // = DirectRangesSize when tree is used
-  BlockRange directRanges[DirectRangesSize];
 
   static const uint64_t NoRootBlock = std::numeric_limits<uint64_t>::max();
   uint64_t treeRootBlockIndex;
+
+  struct IndirectReferences
+  {
+    static const unsigned MaxCount = 20;
+
+    uint16_t itemsCount;
+    ChildNodeReference children[MaxCount];
+  };
+
+  struct DirectReferences
+  {
+    static const unsigned MaxCount = 20;
+
+    uint16_t itemsCount;
+    BlockRange ranges[MaxCount];
+  };
+
+  union
+  {
+    DirectReferences directReferences;
+    IndirectReferences indirectReferences;
+  };
 };
 
 struct Inode: InodeHeader

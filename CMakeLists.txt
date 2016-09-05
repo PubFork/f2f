@@ -49,8 +49,6 @@ set(SOURCES
   src/BlockStorage.cpp 
   src/FileBlocks.hpp 
   src/FileBlocks.cpp 
-#  src/FileBlocksWithDirectRanges.hpp 
-#  src/FileBlocksWithDirectRanges.cpp 
   src/File.hpp 
   src/File.cpp 
   src/Exception.hpp

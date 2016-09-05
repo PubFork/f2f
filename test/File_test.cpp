@@ -42,16 +42,15 @@ TEST_P(FileRemainsTest, NoRemains2)
   std::vector<std::pair<unsigned, size_t>> log; // <amount written, size after>
   size_t totalSize = 0;
 
+  std::vector<char> buf(5'000'000);
   std::minstd_rand random_engine;
-  std::uniform_int_distribution<int> uniform_dist1(1, 50000);
-  const char buf[50000] = {};
-  
+  std::uniform_int_distribution<int> uniform_dist1(1, buf.size());
   for(int i=0; totalSize < 4'900'000'000ui64; ++i)
   {
     for(auto const & file: files)
     {
       auto size = uniform_dist1(random_engine);
-      file->write(size, buf);
+      file->write(size, buf.data());
       log.push_back(std::make_pair(size, storage.data().size()));
       totalSize += size;
     }
@@ -67,7 +66,7 @@ TEST_P(FileRemainsTest, NoRemains2)
       EXPECT_EQ(log.back().second, storage.data().size());
       (*it)->seek((*it)->position() - log.back().first);
       (*it)->truncate();
-      if (i%10000 == 99)
+      if (i%100 == 99)
         (*it)->check();
       log.pop_back();
     }
