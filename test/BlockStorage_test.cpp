@@ -25,7 +25,7 @@ TEST(BlockStorage, T1)
       EXPECT_TRUE(allocated.insert(block).second);
     });
     EXPECT_EQ(1, allocated.size());
-    blockStorage.releaseBlocks(allocated.begin()->index(), 1);
+    blockStorage.releaseBlocks(*allocated.begin(), 1);
   }
   EXPECT_EQ(0, storage.size());
   {
@@ -46,7 +46,7 @@ TEST(BlockStorage, T2)
       EXPECT_TRUE(allocated.insert(block).second);
     });
     for(auto block: allocated)
-      blockStorage.releaseBlocks(block.index(), 1);
+      blockStorage.releaseBlocks(block, 1);
   }
   EXPECT_EQ(0, storage.size());
   {
@@ -85,7 +85,7 @@ TEST(BlockStorage, T3)
       }
     }
     for (auto block : allocated)
-      blockStorage.releaseBlocks(block.index(), 1);
+      blockStorage.releaseBlocks(block, 1);
   }
 }
 
@@ -115,13 +115,13 @@ TEST(BlockStorage, Random_Slow)
       std::uniform_int_distribution<size_t> uniform_dist3(0, allocated.size() - 1);
       auto it = allocated.begin();
       std::advance(it, uniform_dist3(random_engine));
-      auto block = it->index();
+      auto block = *it;
       auto endIt = it;
       ++endIt;
       int nBlocksToRelease = 1;
       for(int maxBlocks = uniform_dist1(random_engine); nBlocksToRelease < maxBlocks; ++nBlocksToRelease, ++endIt)
       {
-        if (endIt == allocated.end() || endIt->index() != block + nBlocksToRelease)
+        if (endIt == allocated.end() || endIt->index() != block.index() + nBlocksToRelease)
           break;
       }
       
@@ -161,7 +161,7 @@ TEST(BlockStorage, Random_Slow)
   }
   for(auto block: allocated)
   {
-    blockStorage->releaseBlocks(block.index(), 1);
+    blockStorage->releaseBlocks(block, 1);
   }
   EXPECT_EQ(0, storage.size());
 }

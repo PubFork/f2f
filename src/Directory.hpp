@@ -39,15 +39,15 @@ private:
 
   void checkOpenMode();
 
-  void read(uint64_t blockIndex, format::DirectoryTreeInternalNode & internalNode) const;
-  void read(uint64_t blockIndex, format::DirectoryTreeLeaf & leaf) const;
+  void read(BlockAddress blockIndex, format::DirectoryTreeInternalNode & internalNode) const;
+  void read(BlockAddress blockIndex, format::DirectoryTreeLeaf & leaf) const;
 
   typedef uint32_t NameHash_t;
   boost::optional<uint64_t> searchInNode(NameHash_t nameHash, utf8string_t const & fileName, unsigned levelsRemain, format::DirectoryTreeChildNodeReference const * children, unsigned itemsCount) const;
   boost::optional<uint64_t> searchInNode(NameHash_t nameHash, utf8string_t const & fileName, format::DirectoryTreeLeafItem const & head, unsigned dataSize) const;
-  boost::optional<uint64_t> searchInNode(NameHash_t nameHash, utf8string_t const & fileName, unsigned levelsRemain, uint64_t blockIndex) const;
+  boost::optional<uint64_t> searchInNode(NameHash_t nameHash, utf8string_t const & fileName, unsigned levelsRemain, BlockAddress blockIndex) const;
 
-  std::vector<format::DirectoryTreeChildNodeReference> insertInNode(uint64_t inode, NameHash_t nameHash, utf8string_t const & fileName, unsigned levelsRemain, uint64_t blockIndex);
+  std::vector<format::DirectoryTreeChildNodeReference> insertInNode(uint64_t inode, NameHash_t nameHash, utf8string_t const & fileName, unsigned levelsRemain, BlockAddress blockIndex);
   boost::optional<format::DirectoryTreeChildNodeReference> insertInNode(
     uint64_t inode, NameHash_t nameHash, utf8string_t const & fileName, 
     unsigned levelsRemain, format::DirectoryTreeChildNodeReference * children, 

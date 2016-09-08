@@ -31,7 +31,7 @@ File::File(BlockStorage & blockStorage, BlockAddress const & inodeAddress, OpenM
   , m_position(0)
 {
   checkOpenMode();
-  util::readT(m_storage, inodeAddress.absoluteAddress(), m_inode);
+  util::readT(m_storage, inodeAddress, m_inode);
 }
 
 void File::checkOpenMode()
@@ -43,7 +43,7 @@ void File::checkOpenMode()
 void File::remove()
 {
   m_fileBlocks.truncate(0);
-  m_blockStorage.releaseBlocks(m_inodeAddress.index(), 1);
+  m_blockStorage.releaseBlocks(m_inodeAddress, 1);
 }
 
 void File::seek(uint64_t position)
@@ -103,17 +103,17 @@ void File::processData(size_t size, std::function<void (uint64_t, unsigned int)>
     if (m_fileBlocks.eof())
       throw std::runtime_error("Internal error");
     FileBlocks::OffsetAndSize offsetAndSize = m_fileBlocks.currentRange();
-    offsetAndSize.first = BlockAddress::fromBlockIndex(offsetAndSize.first).absoluteAddress(); // Convert blocks to bytes
+    auto absoluteAddress = offsetAndSize.first.absoluteAddress(); // Convert blocks to bytes
     unsigned bytesToReadFromRange = offsetAndSize.second * format::AddressableBlockSize;
     if (skipFromStart > 0)
     {
-      offsetAndSize.first += skipFromStart;
+      absoluteAddress += skipFromStart;
       bytesToReadFromRange -= skipFromStart;
       skipFromStart = 0;
     }
     if (bytesToReadFromRange > remainingBytes)
       bytesToReadFromRange = unsigned(remainingBytes);
-    processFunc(offsetAndSize.first, bytesToReadFromRange);
+    processFunc(absoluteAddress, bytesToReadFromRange);
     remainingBytes -= bytesToReadFromRange;
     if (remainingBytes == 0)
       break;

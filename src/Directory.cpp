@@ -97,7 +97,7 @@ Directory::Directory(BlockStorage & blockStorage, BlockAddress const & inodeAddr
   , m_openMode(openMode)
 {
   checkOpenMode();
-  util::readT(m_storage, inodeAddress.absoluteAddress(), m_inode);
+  util::readT(m_storage, inodeAddress, m_inode);
 
   F2F_FORMAT_ASSERT(m_inode.levelsCount < 100);
   if (m_inode.levelsCount > 0)
@@ -112,15 +112,15 @@ void Directory::checkOpenMode()
     throw OpenModeError("Can't open for write: storage is in in read-only mode ");
 }
 
-void Directory::read(uint64_t blockIndex, format::DirectoryTreeInternalNode & internalNode) const
+void Directory::read(BlockAddress blockIndex, format::DirectoryTreeInternalNode & internalNode) const
 {
-  util::readT(m_storage, BlockAddress::fromBlockIndex(blockIndex).absoluteAddress(), internalNode);
+  util::readT(m_storage, blockIndex, internalNode);
   F2F_FORMAT_ASSERT(internalNode.itemsCount <= internalNode.MaxCount);
 }
 
-void Directory::read(uint64_t blockIndex, format::DirectoryTreeLeaf & leaf) const
+void Directory::read(BlockAddress blockIndex, format::DirectoryTreeLeaf & leaf) const
 {
-  util::readT(m_storage, BlockAddress::fromBlockIndex(blockIndex).absoluteAddress(), leaf);
+  util::readT(m_storage, blockIndex, leaf);
   F2F_FORMAT_ASSERT(leaf.dataSize <= leaf.MaxDataSize);
 }
 
@@ -167,7 +167,9 @@ boost::optional<uint64_t> Directory::searchInNode(NameHash_t nameHash,
   --position;
   // In case of hash collision and long file names more than one branch may contain same hash
   for(; position != children + itemsCount && (position == children || nameHash >= position->nameHash); ++position)
-    if (boost::optional<uint64_t> result = searchInNode(nameHash, fileName, levelsRemain - 1, position->childBlockIndex))
+    if (boost::optional<uint64_t> result = searchInNode(
+        nameHash, fileName, levelsRemain - 1, 
+        BlockAddress::fromBlockIndex(position->childBlockIndex)))
       return result;
   return {};
 }
@@ -191,7 +193,7 @@ boost::optional<uint64_t> Directory::searchInNode(
 }
 
 boost::optional<uint64_t> Directory::searchInNode(NameHash_t nameHash, 
-  utf8string_t const & fileName, unsigned levelsRemain, uint64_t blockIndex) const
+  utf8string_t const & fileName, unsigned levelsRemain, BlockAddress blockIndex) const
 {
   if (levelsRemain > 0)
   {
@@ -209,7 +211,7 @@ boost::optional<uint64_t> Directory::searchInNode(NameHash_t nameHash,
 
 std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
   uint64_t inode, NameHash_t nameHash, utf8string_t const & fileName,
-  unsigned levelsRemain, uint64_t blockIndex)
+  unsigned levelsRemain, BlockAddress blockIndex)
 {
   std::vector<format::DirectoryTreeChildNodeReference> newChildren;
   if (levelsRemain == 0)
@@ -220,7 +222,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
     newChildren = insertInNode(inode, nameHash, fileName, 
       leaf.head, leaf.dataSize, format::DirectoryTreeLeaf::MaxDataSize, isDirty);
     if (isDirty)
-      util::writeT(m_storage, BlockAddress::fromBlockIndex(blockIndex).absoluteAddress(), leaf);
+      util::writeT(m_storage, blockIndex, leaf);
   }
   else
   {
@@ -230,7 +232,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
     auto newChild = insertInNode(inode, nameHash, fileName, levelsRemain, internalNode.children,
       internalNode.itemsCount, internalNode.MaxCount, isDirty);
     if (isDirty)
-      util::writeT(m_storage, BlockAddress::fromBlockIndex(blockIndex).absoluteAddress(), internalNode);
+      util::writeT(m_storage, blockIndex, internalNode);
     if (newChild)
       newChildren.push_back(*newChild);
   }
@@ -257,7 +259,7 @@ boost::optional<format::DirectoryTreeChildNodeReference> Directory::insertInNode
     --position;
 
   std::vector<format::DirectoryTreeChildNodeReference> newChildren =
-    insertInNode(inode, nameHash, fileName, levelsRemain - 1, position->childBlockIndex);
+    insertInNode(inode, nameHash, fileName, levelsRemain - 1, BlockAddress::fromBlockIndex(position->childBlockIndex));
 
   if (!newChildren.empty())
   {
@@ -539,16 +541,16 @@ void Directory::removeNode(format::DirectoryTreeChildNodeReference const * child
     if (levelsRemain == 1)
     {
       format::DirectoryTreeLeaf leaf;
-      read(children[i].childBlockIndex, leaf);
+      read(BlockAddress::fromBlockIndex(children[i].childBlockIndex), leaf);
       removeNode(leaf.head, leaf.dataSize);
     }
     else
     {
       format::DirectoryTreeInternalNode internalNode;
-      read(children[i].childBlockIndex, internalNode);
+      read(BlockAddress::fromBlockIndex(children[i].childBlockIndex), internalNode);
       removeNode(internalNode.children, internalNode.itemsCount, levelsRemain - 1);
     }
-    m_blockStorage.releaseBlocks(children[i].childBlockIndex, 1);
+    m_blockStorage.releaseBlocks(BlockAddress::fromBlockIndex(children[i].childBlockIndex), 1);
   }
 }
 
@@ -582,17 +584,17 @@ void Directory::checkNode(CheckState & checkState, format::DirectoryTreeChildNod
       F2F_FORMAT_ASSERT(children[i].nameHash >= checkState.lastHash);
       checkState.lastHash = children[i].nameHash;
     }
-    m_blockStorage.checkAllocatedBlock(children[i].childBlockIndex);
+    m_blockStorage.checkAllocatedBlock(BlockAddress::fromBlockIndex(children[i].childBlockIndex));
     if (levelsRemain == 1)
     {
       format::DirectoryTreeLeaf leaf;
-      read(children[i].childBlockIndex, leaf);
+      read(BlockAddress::fromBlockIndex(children[i].childBlockIndex), leaf);
       checkNode(checkState, leaf.head, leaf.dataSize);
     }
     else
     {
       format::DirectoryTreeInternalNode internalNode;
-      read(children[i].childBlockIndex, internalNode);
+      read(BlockAddress::fromBlockIndex(children[i].childBlockIndex), internalNode);
       checkNode(checkState, internalNode.children, internalNode.itemsCount, levelsRemain - 1);
     }
   }

@@ -133,8 +133,10 @@ void BlockStorage::appendBlocks(uint64_t numBlocks, std::function<void(BlockAddr
     visitor(BlockAddress::fromBlockIndex(blockIndex));
 }
 
-void BlockStorage::releaseBlocks(uint64_t blockIndex, unsigned numBlocks)
+void BlockStorage::releaseBlocks(BlockAddress blockAddress, unsigned numBlocks)
 {
+  auto blockIndex = blockAddress.index();
+
   if (blockIndex + numBlocks > m_blocksCount)
     throw std::runtime_error("Expectation fault: Invalid argument");
 
@@ -156,10 +158,11 @@ void BlockStorage::releaseBlocks(uint64_t blockIndex, unsigned numBlocks)
     markBlocks(blockIndex, numBlocks, Status::free);
 }
 
-bool BlockStorage::isAdjacentBlocks(uint64_t blockIndex1, uint64_t blockIndex2)
+bool BlockStorage::isAdjacentBlocks(BlockAddress blockRangeStart, unsigned rangeSize, BlockAddress blockIndex2)
 {
-  return blockIndex1 + 1 == blockIndex2
-    && getBlockGroupIndex(blockIndex1) == getBlockGroupIndex(blockIndex2);
+  auto lastBlockInRange = blockRangeStart.index() + rangeSize - 1;
+  return lastBlockInRange + 1 == blockIndex2.index()
+    && getBlockGroupIndex(lastBlockInRange) == getBlockGroupIndex(blockIndex2.index());
 }
 
 int64_t BlockStorage::findStartOfFreeBlocksRange(uint64_t endBlockIndex) const
@@ -223,13 +226,13 @@ void BlockStorage::check() const
 {
 }
 
-void BlockStorage::checkAllocatedBlock(uint64_t blockIndex) const
+void BlockStorage::checkAllocatedBlock(BlockAddress blockIndex) const
 {
-  F2F_FORMAT_ASSERT(blockIndex < m_blocksCount);
+  F2F_FORMAT_ASSERT(blockIndex.index() < m_blocksCount);
 
   format::OccupancyBlock block;
-  util::readT(m_storage, getOccupancyBlockPosition(getBlockGroupIndex(blockIndex)), block);
-  F2F_FORMAT_ASSERT(util::GetBitInRange(block.bitmap, getBlockIndexInGroup(blockIndex)));
+  util::readT(m_storage, getOccupancyBlockPosition(getBlockGroupIndex(blockIndex.index())), block);
+  F2F_FORMAT_ASSERT(util::GetBitInRange(block.bitmap, getBlockIndexInGroup(blockIndex.index())));
 }
 
 void BlockStorage::enumerateAllocatedBlocks(std::function<void(BlockAddress const &)> const & visitor) const

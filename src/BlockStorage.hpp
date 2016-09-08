@@ -41,12 +41,12 @@ public:
   // TODO: return ranges instead?
   BlockAddress allocateBlock();
   void allocateBlocks(uint64_t numBlocks, std::function<void (BlockAddress const &)> const & visitor);
-  void releaseBlocks(uint64_t blockIndex, unsigned numBlocks);
-  static bool isAdjacentBlocks(uint64_t blockIndex1, uint64_t blockIndex2);
+  void releaseBlocks(BlockAddress blockIndex, unsigned numBlocks);
+  static bool isAdjacentBlocks(BlockAddress blockRangeStart, unsigned rangeSize, BlockAddress blockIndex2);
 
   // Diagnostics
   void check() const;
-  void checkAllocatedBlock(uint64_t blockIndex) const;
+  void checkAllocatedBlock(BlockAddress blockIndex) const;
   void enumerateAllocatedBlocks(std::function<void(BlockAddress const &)> const & visitor) const;
 
 private:
