@@ -30,15 +30,19 @@ endif()
 set(FORMAT_SOURCES
   src/format/BlockStorage.hpp 
   src/format/Common.hpp
+  src/format/Directory.hpp
+  src/format/File.hpp
   src/format/Inode.hpp 
 )
 
 source_group("format" FILES ${FORMAT_SOURCES})
 
 set(UTIL_SOURCES
+  src/util/Algorithm.hpp 
   src/util/BitRange.hpp 
   src/util/StorageT.hpp
   src/util/FloorDiv.hpp 
+  src/util/FNVHash.hpp 
 )
 
 source_group("util" FILES ${UTIL_SOURCES})
@@ -51,6 +55,8 @@ set(SOURCES
   src/FileBlocks.cpp 
   src/File.hpp 
   src/File.cpp 
+  src/Directory.hpp 
+  src/Directory.cpp 
   src/Exception.hpp
 )
 
@@ -63,8 +69,10 @@ add_library(f2f
 )
 
 set(TEST_SOURCES
+  test/Algorithm_test.cpp 
   test/BitRange_test.cpp 
   test/BlockStorage_test.cpp 
+  test/Directory_test.cpp 
   test/File_test.cpp 
   test/StorageInMemory.hpp 
   test/StorageInMemory.cpp 
@@ -84,6 +92,8 @@ add_executable(f2f_test
   src/FileBlocks.cpp 
   src/File.hpp 
   src/File.cpp 
+  src/Directory.hpp 
+  src/Directory.cpp 
 )
 
 target_include_directories(f2f_test

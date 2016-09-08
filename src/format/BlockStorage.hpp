@@ -2,7 +2,8 @@
 
 #include <cstdint>
 
-namespace f2f { namespace format {
+namespace f2f { namespace format 
+{
 
 static const int OccupancyBlockSize = 1024; // in bytes
 

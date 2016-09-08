@@ -39,6 +39,7 @@ public:
   IStorage & storage() const { return m_storage; }
 
   // TODO: return ranges instead?
+  BlockAddress allocateBlock();
   void allocateBlocks(uint64_t numBlocks, std::function<void (BlockAddress const &)> const & visitor);
   void releaseBlocks(uint64_t blockIndex, unsigned numBlocks);
   static bool isAdjacentBlocks(uint64_t blockIndex1, uint64_t blockIndex2);

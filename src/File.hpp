@@ -29,7 +29,7 @@ private:
   IStorage & m_storage;
   OpenMode const m_openMode;
   BlockAddress m_inodeAddress;
-  format::Inode m_inode;
+  format::FileInode m_inode;
   bool m_inodeTreeRootIsDirty;
   FileBlocks m_fileBlocks;
   uint64_t m_position;

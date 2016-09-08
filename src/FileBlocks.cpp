@@ -8,7 +8,7 @@ namespace f2f
 
 FileBlocks::FileBlocks(
   BlockStorage & blockStorage, 
-  format::Inode & inode,
+  format::FileInode & inode,
   bool & treeRootBlockIsDirty,
   bool initializeInode)
   : m_blockStorage(blockStorage)
@@ -18,7 +18,7 @@ FileBlocks::FileBlocks(
 {
   if (initializeInode)
   {
-    m_inode.flags &= ~format::Inode::FlagIndirectRanges;
+    m_inode.levelsCount = 0;
     m_inode.directReferences.itemsCount = 0;
     m_treeRootBlockIsDirty = true;
   }
@@ -44,11 +44,11 @@ void FileBlocks::moveToNextRange()
   if (m_position->indexInBlock == m_position->block.itemsCount)
     if (m_position->block.nextLeafNode != format::BlockRangesLeafNode::NoNextLeaf)
     {
-      format::BlockRangesNode blockRanges;
-      util::readT(m_storage, BlockAddress::fromBlockIndex(m_position->block.nextLeafNode).absoluteAddress(), blockRanges);
-      m_position->block = blockRanges.leaf;
+      format::BlockRangesLeafNode leaf;
+      util::readT(m_storage, BlockAddress::fromBlockIndex(m_position->block.nextLeafNode).absoluteAddress(), leaf);
+      m_position->block = leaf;
       m_position->indexInBlock = 0;
-      m_position->range = OffsetAndSize(blockRanges.leaf.ranges[0].blockIndex(), blockRanges.leaf.ranges[0].blocksCount);
+      m_position->range = OffsetAndSize(leaf.ranges[0].blockIndex(), leaf.ranges[0].blocksCount);
     }
 }
 
@@ -69,9 +69,9 @@ void FileBlocks::seek(uint64_t blockIndex)
   }
   else
   {
-    if (m_inode.flags & m_inode.FlagIndirectRanges)
+    if (m_inode.levelsCount > 0)
     {
-      seekInNode(blockIndex, m_inode.indirectReferences.children, m_inode.indirectReferences.itemsCount);
+      seekInNode(m_inode.levelsCount, blockIndex, m_inode.indirectReferences.children, m_inode.indirectReferences.itemsCount);
     }
     else
     {
@@ -113,34 +113,38 @@ void FileBlocks::seekInNode(uint64_t keyBlockIndex, format::BlockRange const * r
     position->blocksCount - (keyBlockIndex - position->fileOffset));
 }
 
-void FileBlocks::seekInNode(uint64_t keyBlockIndex, format::ChildNodeReference const * children, unsigned itemsCount)
+void FileBlocks::seekInNode(unsigned levelsRemain, uint64_t keyBlockIndex, format::ChildNodeReference const * children, unsigned itemsCount)
 {
   auto position = std::lower_bound(
     children + 1,
     children + itemsCount,
     keyBlockIndex,
-    [](format::ChildNodeReference const & range, uint64_t blockIndex) -> bool {
+    [](format::ChildNodeReference const & range, uint64_t blockIndex) -> bool 
+    {
       return range.fileOffset < blockIndex;
     }
   );
   if (position == children + itemsCount || position->fileOffset != keyBlockIndex)
     --position;
-  seekTree(keyBlockIndex, position->childBlockIndex);
+  seekTree(levelsRemain - 1, keyBlockIndex, position->childBlockIndex);
 }
 
-void FileBlocks::seekTree(uint64_t keyBlockIndex, uint64_t nodeBlock) 
+void FileBlocks::seekTree(unsigned levelsRemain, uint64_t keyBlockIndex, uint64_t nodeBlock) 
 {
-  format::BlockRangesNode blockRanges;
-  util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), blockRanges);
-
-  if (blockRanges.isLeafNode)
+  if (levelsRemain == 0)
   {
-    seekInNode(keyBlockIndex, blockRanges.leaf.ranges, blockRanges.leaf.itemsCount);
-    m_position->block.nextLeafNode = blockRanges.leaf.nextLeafNode;
+    format::BlockRangesLeafNode leaf;
+    util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), leaf);
+
+    seekInNode(keyBlockIndex, leaf.ranges, leaf.itemsCount);
+    m_position->block.nextLeafNode = leaf.nextLeafNode;
   }
   else
   {
-    seekInNode(keyBlockIndex, blockRanges.internal.children, blockRanges.internal.itemsCount);
+    format::BlockRangesInternalNode internal;
+    util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), internal);
+
+    seekInNode(levelsRemain, keyBlockIndex, internal.children, internal.itemsCount);
   }
 }
 
@@ -148,29 +152,27 @@ namespace
 {
   struct RootReferencesTraitsDirect
   {
-    static format::Inode::DirectReferences & getInodeContainer(format::Inode & inode)
+    static format::FileInode::DirectReferences & getInodeContainer(format::FileInode & inode)
     { return inode.directReferences; }
 
-    static format::BlockRangesLeafNode & getNodeContainer(format::BlockRangesNode & blockRanges)
-    { return blockRanges.leaf; }
+    typedef format::BlockRangesLeafNode NodeType;
   };
 
   struct RootReferencesTraitsIndirect
   {
-    static format::Inode::IndirectReferences & getInodeContainer(format::Inode & inode)
+    static format::FileInode::IndirectReferences & getInodeContainer(format::FileInode & inode)
     { return inode.indirectReferences; }
 
-    static format::BlockRangesInternalNode & getNodeContainer(format::BlockRangesNode & blockRanges)
-    { return blockRanges.internal; }
+    typedef format::BlockRangesInternalNode NodeType;
   };
 
-  inline format::ChildNodeReference * getItems(format::Inode::IndirectReferences & container)
+  inline format::ChildNodeReference * getItems(format::FileInode::IndirectReferences & container)
   { return container.children; }
 
   inline format::ChildNodeReference * getItems(format::BlockRangesInternalNode & container)
   { return container.children; }
 
-  inline format::BlockRange * getItems(format::Inode::DirectReferences & container)
+  inline format::BlockRange * getItems(format::FileInode::DirectReferences & container)
   { return container.ranges; }
 
   inline format::BlockRange * getItems(format::BlockRangesLeafNode & container)
@@ -183,31 +185,29 @@ void FileBlocks::append(uint64_t numBlocks)
   // copy values back to inode if inode storage size is enough or create another "standalone" leaf node for them
   // otherwise
 
-  format::BlockRangesNode blockRanges;
-  if (m_inode.flags & m_inode.FlagIndirectRanges)
+  if (m_inode.levelsCount > 0)
   {
-    blockRanges.isLeafNode = false;
-    appendRootT<RootReferencesTraitsIndirect>(numBlocks, blockRanges);
+    format::BlockRangesInternalNode node;
+    appendRootT<RootReferencesTraitsIndirect>(numBlocks, node);
   }
   else
   {
-    blockRanges.isLeafNode = true;
-    blockRanges.leaf.nextLeafNode = blockRanges.leaf.NoNextLeaf;
-    appendRootT<RootReferencesTraitsDirect>(numBlocks, blockRanges);
+    format::BlockRangesLeafNode leaf;
+    leaf.nextLeafNode = leaf.NoNextLeaf;
+    appendRootT<RootReferencesTraitsDirect>(numBlocks, leaf);
   }
 
   m_position.reset();
 }
 
 template<class Traits>
-void FileBlocks::appendRootT(uint64_t numBlocks, format::BlockRangesNode & blockRanges)
+void FileBlocks::appendRootT(uint64_t numBlocks, typename Traits::NodeType & node_container)
 {
   // Make in-memory BlockRangesNode pseudo-record for direct/indirect references "inlined" in inode, then
   // copy values back to inode if inode storage size is enough or create another "standalone" leaf node for them
   // otherwise
   
   auto & inode_container = Traits::getInodeContainer(m_inode);
-  auto & node_container = Traits::getNodeContainer(blockRanges);
 
   node_container.itemsCount = inode_container.itemsCount;
   std::copy_n(
@@ -216,15 +216,14 @@ void FileBlocks::appendRootT(uint64_t numBlocks, format::BlockRangesNode & block
     getItems(node_container));
 
   std::vector<format::ChildNodeReference> childrenToAdd =
-    appendToTreeNode(numBlocks, node_container, m_treeRootBlockIsDirty);
+    appendToTreeNode(m_inode.levelsCount, numBlocks, node_container, m_treeRootBlockIsDirty);
   if (node_container.itemsCount != inode_container.itemsCount)
   {
     if (node_container.itemsCount > inode_container.MaxCount)
     {
       // Move inode references to separate tree node
-      BlockAddress newNode;
-      m_blockStorage.allocateBlocks(1, [&newNode](BlockAddress block) { newNode = block; });
-      util::writeT(m_storage, newNode.absoluteAddress(), blockRanges);
+      BlockAddress newNode = m_blockStorage.allocateBlock();
+      util::writeT(m_storage, newNode.absoluteAddress(), node_container);
 
       format::ChildNodeReference newChildReference;
       newChildReference.childBlockIndex = newNode.index();
@@ -248,11 +247,14 @@ void FileBlocks::appendRootT(uint64_t numBlocks, format::BlockRangesNode & block
   else
     assert(childrenToAdd.empty());
 
-  while (childrenToAdd.size() > format::Inode::IndirectReferences::MaxCount)
+  while (childrenToAdd.size() > format::FileInode::IndirectReferences::MaxCount)
+  {
+    ++m_inode.levelsCount;
     childrenToAdd = createInternalNodes(childrenToAdd.data(), childrenToAdd.data() + childrenToAdd.size());
+  }
   if (!childrenToAdd.empty())
   {
-    m_inode.flags |= m_inode.FlagIndirectRanges;
+    ++m_inode.levelsCount;
     m_inode.indirectReferences.itemsCount = childrenToAdd.size();
     std::copy(
       childrenToAdd.begin(),
@@ -264,6 +266,7 @@ void FileBlocks::appendRootT(uint64_t numBlocks, format::BlockRangesNode & block
 }
 
 std::vector<format::ChildNodeReference> FileBlocks::appendToTreeNode(
+  unsigned,
   uint64_t numBlocks, format::BlockRangesLeafNode & node, bool & isDirty)
 {
   std::vector<OffsetAndSize> newBlockRanges;
@@ -332,9 +335,7 @@ std::vector<format::ChildNodeReference> FileBlocks::appendToTreeNode(
       newSiblingReferences.back().childBlockIndex = newLeafIndex.index();
       newSiblingReferences.back().fileOffset = positonInFile;
 
-      format::BlockRangesNode newNode;
-      newNode.isLeafNode = true;
-      format::BlockRangesLeafNode & newLeaf = newNode.leaf;
+      format::BlockRangesLeafNode newLeaf;
 
       // Init leaf forward reference
       if (newLeafIndexIt + 1 != newLeafs.end())
@@ -353,16 +354,19 @@ std::vector<format::ChildNodeReference> FileBlocks::appendToTreeNode(
         item.fileOffset = positonInFile;
         positonInFile += item.blocksCount;
       }
-      util::writeT(m_storage, newLeafIndex.absoluteAddress(), newNode);
+      util::writeT(m_storage, newLeafIndex.absoluteAddress(), newLeaf);
     }
   }
   return newSiblingReferences;
 }
 
 std::vector<format::ChildNodeReference> FileBlocks::appendToTreeNode(
-  uint64_t numBlocks, format::BlockRangesInternalNode & node, bool & isDirty)
+  unsigned levelsRemain, uint64_t numBlocks, format::BlockRangesInternalNode & node, bool & isDirty)
 {
-  auto newChildrenReferences = appendToTree(numBlocks, node.children[node.itemsCount - 1].childBlockIndex);
+  auto newChildrenReferences = appendToTree(
+    levelsRemain - 1, 
+    numBlocks, 
+    node.children[node.itemsCount - 1].childBlockIndex);
   auto newChildrenStart = newChildrenReferences.begin();
 
   // Fill remaining free places in this block
@@ -400,9 +404,7 @@ std::vector<format::ChildNodeReference> FileBlocks::createInternalNodes(
     newSiblingReferences.back().childBlockIndex = newNodeIndex.index();
     newSiblingReferences.back().fileOffset = newChildrenStart->fileOffset;
 
-    format::BlockRangesNode newNode;
-    newNode.isLeafNode = false;
-    format::BlockRangesInternalNode & newInternal = newNode.internal;
+    format::BlockRangesInternalNode newInternal;
     for (newInternal.itemsCount = 0;
       newInternal.itemsCount < newInternal.MaxCount
       && newChildrenStart != newChildrenEnd;
@@ -410,28 +412,32 @@ std::vector<format::ChildNodeReference> FileBlocks::createInternalNodes(
     {
       newInternal.children[newInternal.itemsCount] = *newChildrenStart;
     }
-    util::writeT(m_storage, newNodeIndex.absoluteAddress(), newNode);
+    util::writeT(m_storage, newNodeIndex.absoluteAddress(), newInternal);
   }
   return newSiblingReferences;
 }
 
-std::vector<format::ChildNodeReference> FileBlocks::appendToTree(uint64_t numBlocks, uint64_t nodeBlock)
+std::vector<format::ChildNodeReference> FileBlocks::appendToTree(unsigned levelsRemain, uint64_t numBlocks, uint64_t nodeBlock)
 {
-  format::BlockRangesNode blockRanges;
-  util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), blockRanges);
-
   std::vector<format::ChildNodeReference> result;
   bool isDirty = false;
-  if (blockRanges.isLeafNode)
+  if (levelsRemain == 0)
   {
-    result = appendToTreeNode(numBlocks, blockRanges.leaf, isDirty);
+    format::BlockRangesLeafNode leaf;
+    util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), leaf);
+    result = appendToTreeNode(levelsRemain, numBlocks, leaf, isDirty);
+    if (isDirty)
+      util::writeT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), leaf);
   }
   else
   {
-    result = appendToTreeNode(numBlocks, blockRanges.internal, isDirty);
+    format::BlockRangesInternalNode internal;
+    util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), internal);
+    result = appendToTreeNode(levelsRemain, numBlocks, internal, isDirty);
+    if (isDirty)
+      util::writeT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), internal);
   }
-  if (isDirty)
-    util::writeT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), blockRanges);
+  
   return result;
 }
 
@@ -461,6 +467,7 @@ void FileBlocks::truncateTreeNode(uint64_t newSizeInBlocks, format::BlockRange *
 }
 
 void FileBlocks::truncateTreeNode(
+  unsigned levelsRemain, 
   uint64_t newSizeInBlocks, 
   format::ChildNodeReference const * children, 
   uint16_t & itemsCount, 
@@ -470,6 +477,7 @@ void FileBlocks::truncateTreeNode(
   for (; itemsCount > 0; --itemsCount)
   {
     if (!truncateTree(
+        levelsRemain - 1,
         newSizeInBlocks, 
         children[itemsCount - 1].childBlockIndex,
         itemsCount == 1 ? onNewRoot : OnNewRootFunc())
@@ -480,106 +488,135 @@ void FileBlocks::truncateTreeNode(
 }
 
 // Return true if node was deleted or its reference moved to root
-bool FileBlocks::truncateTree(uint64_t newSizeInBlocks, uint64_t nodeBlock, OnNewRootFunc const & onNewRoot)
+bool FileBlocks::truncateTree(unsigned levelsRemain, uint64_t newSizeInBlocks, uint64_t nodeBlock, OnNewRootFunc const & onNewRoot)
 {
-  format::BlockRangesNode blockRanges;
-  util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), blockRanges);
-
   bool isDirty = false;
-  if (blockRanges.isLeafNode)
+  if (levelsRemain == 0)
   {
-    truncateTreeNode(newSizeInBlocks, blockRanges.leaf.ranges, blockRanges.leaf.itemsCount, isDirty);
-    if (blockRanges.leaf.itemsCount == 0)
+    format::BlockRangesLeafNode leaf;
+    util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), leaf);
+    truncateTreeNode(newSizeInBlocks, leaf.ranges, leaf.itemsCount, isDirty);
+    if (leaf.itemsCount == 0)
     {
       m_blockStorage.releaseBlocks(nodeBlock, 1);
       return true;
     }
-    else if (blockRanges.leaf.nextLeafNode != format::BlockRangesLeafNode::NoNextLeaf)
+    else if (leaf.nextLeafNode != format::BlockRangesLeafNode::NoNextLeaf)
     {
-      blockRanges.leaf.nextLeafNode = format::BlockRangesLeafNode::NoNextLeaf;
+      leaf.nextLeafNode = format::BlockRangesLeafNode::NoNextLeaf;
       isDirty = true;
     }
+    bool returnValue = false;
+    if (onNewRoot)
+    {
+      if (onNewRoot(nodeBlock, levelsRemain, &leaf, nullptr))
+      {
+        m_blockStorage.releaseBlocks(nodeBlock, 1);
+        return true;
+      }
+      else
+        // Save node and return true - delete ascendants
+        returnValue = true;
+    }
+    if (isDirty)
+      util::writeT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), leaf);
+    return returnValue;
   }
   else
   {
-    truncateTreeNode(newSizeInBlocks, blockRanges.internal.children, blockRanges.internal.itemsCount, isDirty, onNewRoot);
-    if (blockRanges.internal.itemsCount == 0)
+    format::BlockRangesInternalNode internal;
+    util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), internal);
+    truncateTreeNode(levelsRemain, newSizeInBlocks, internal.children, internal.itemsCount, isDirty, onNewRoot);
+    if (internal.itemsCount == 0)
     {
       m_blockStorage.releaseBlocks(nodeBlock, 1);
       return true;
     }
-  }
-
-  bool returnValue = false;
-  if (onNewRoot)
-  {
-    if (onNewRoot(nodeBlock, blockRanges))
+    bool returnValue = false;
+    if (onNewRoot)
     {
-      m_blockStorage.releaseBlocks(nodeBlock, 1);
-      return true;
+      if (onNewRoot(nodeBlock, levelsRemain, nullptr, &internal))
+      {
+        m_blockStorage.releaseBlocks(nodeBlock, 1);
+        return true;
+      }
+      else
+        // Save node and return true - delete ascendants
+        returnValue = true;
     }
-    else
-      // Save node and return true - delete ascendants
-      returnValue = true;
+    if (isDirty)
+      util::writeT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), internal);
+    return returnValue;
   }
-  if (isDirty)
-    util::writeT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), blockRanges);
-  return returnValue;
 }
 
 void FileBlocks::truncate(uint64_t newSizeInBlocks)
 {
-  if (m_inode.flags & m_inode.FlagIndirectRanges)
+  if (m_inode.levelsCount > 0)
   {
-    boost::optional<format::BlockRangesNode> newRootContent;
+    boost::optional<format::BlockRangesLeafNode> newLeafContent;
+    boost::optional<format::BlockRangesInternalNode> newInternalContent;
     boost::optional<uint64_t> newRootIndex;
-    truncateTreeNode(newSizeInBlocks,
+    unsigned newLevel;
+    truncateTreeNode(
+      m_inode.levelsCount,
+      newSizeInBlocks,
       m_inode.indirectReferences.children,
       m_inode.indirectReferences.itemsCount,
       m_treeRootBlockIsDirty,
-      [&](uint64_t blockIndex, format::BlockRangesNode const & node) -> bool {
-        if (node.isLeafNode && node.leaf.itemsCount <= format::Inode::DirectReferences::MaxCount
-          || !node.isLeafNode && node.internal.itemsCount <= format::Inode::IndirectReferences::MaxCount)
+      [&](uint64_t blockIndex, 
+        unsigned level,
+        format::BlockRangesLeafNode const * leaf, 
+        format::BlockRangesInternalNode const * internal) -> bool
+      {
+        if (leaf && leaf->itemsCount <= format::FileInode::DirectReferences::MaxCount)
         {
-          newRootContent = node;
+          newLeafContent = *leaf;
+          return true; // release original node
+        }
+        else if (internal && internal->itemsCount <= format::FileInode::IndirectReferences::MaxCount)
+        {
+          newInternalContent = *internal;
+          newLevel = level;
           return true; // release original node
         }
         else
         {
           newRootIndex = blockIndex;
+          newLevel = level;
           return false;
         }
       }
     );
     if (newRootIndex)
     {
+      m_inode.levelsCount = newLevel + 1;
       m_inode.indirectReferences.itemsCount = 1;
       m_inode.indirectReferences.children[0].childBlockIndex = *newRootIndex;
       m_inode.indirectReferences.children[0].fileOffset = 0;
       m_treeRootBlockIsDirty = true;
     }
-    else if (newRootContent)
+    else if (newLeafContent)
     {
+      m_inode.levelsCount = 0;
+      m_inode.directReferences.itemsCount = newLeafContent->itemsCount;
+      std::copy_n(
+        newLeafContent->ranges,
+        newLeafContent->itemsCount,
+        m_inode.directReferences.ranges
+      );
       m_treeRootBlockIsDirty = true;
-      if (newRootContent->isLeafNode)
-      {
-        m_inode.flags &= ~m_inode.FlagIndirectRanges;
-        m_inode.directReferences.itemsCount = newRootContent->leaf.itemsCount;
-        std::copy_n(
-          newRootContent->leaf.ranges,
-          newRootContent->leaf.itemsCount,
-          m_inode.directReferences.ranges
-        );
-      }
-      else
-      {
-        m_inode.indirectReferences.itemsCount = newRootContent->internal.itemsCount;
-        std::copy_n(
-          newRootContent->internal.children,
-          newRootContent->internal.itemsCount,
-          m_inode.indirectReferences.children
-        );
-      }
+    }
+    else if (newInternalContent)
+    {
+      m_inode.levelsCount = newLevel;
+      m_inode.indirectReferences.itemsCount = newInternalContent->itemsCount;
+      std::copy_n(
+        newInternalContent->children,
+        newInternalContent->itemsCount,
+        m_inode.indirectReferences.children
+      );
+      m_treeRootBlockIsDirty = true;
     }
   }
   else
@@ -598,33 +635,28 @@ void FileBlocks::check() const
 {
   CheckState state;
   state.filePosition = 0;
-  state.level = 0;
 
-  if (m_inode.flags & m_inode.FlagIndirectRanges)
-    checkTreeNode(m_inode.indirectReferences.children, m_inode.indirectReferences.itemsCount, state);
+  if (m_inode.levelsCount > 0)
+    checkTreeNode(m_inode.levelsCount, m_inode.indirectReferences.children, m_inode.indirectReferences.itemsCount, state);
   else
     checkTreeNode(m_inode.directReferences.ranges, m_inode.directReferences.itemsCount, state);
 
   F2F_FORMAT_ASSERT(!state.lastNextLeafNodeReference 
     || *state.lastNextLeafNodeReference == format::BlockRangesLeafNode::NoNextLeaf);
+
+  F2F_FORMAT_ASSERT(m_inode.blocksCount == state.filePosition);
+  F2F_FORMAT_ASSERT(util::FloorDiv(m_inode.fileSize, format::AddressableBlockSize) == m_inode.blocksCount);
 }
 
-void FileBlocks::checkTree(uint64_t nodeBlock, CheckState & state) const
+void FileBlocks::checkTree(unsigned levelsRemain, uint64_t nodeBlock, CheckState & state) const
 {
   F2F_FORMAT_ASSERT(state.referencedBlocks.insert(nodeBlock).second);
   m_blockStorage.checkAllocatedBlock(nodeBlock);
 
-  format::BlockRangesNode blockRanges;
-  util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), blockRanges);
-
-  if (blockRanges.isLeafNode)
+  if (levelsRemain == 0)
   {
-    if (!state.leafLevel)
-      state.leafLevel = state.level;
-    else
-      F2F_FORMAT_ASSERT(state.leafLevel == state.level);
-
-    auto const & leaf = blockRanges.leaf;
+    format::BlockRangesLeafNode leaf;
+    util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), leaf);
 
     if (state.lastNextLeafNodeReference)
       F2F_FORMAT_ASSERT(nodeBlock == *state.lastNextLeafNodeReference);
@@ -635,9 +667,11 @@ void FileBlocks::checkTree(uint64_t nodeBlock, CheckState & state) const
   }
   else
   {
-    auto const & internal = blockRanges.internal;
+    format::BlockRangesInternalNode internal;
+    util::readT(m_storage, BlockAddress::fromBlockIndex(nodeBlock).absoluteAddress(), internal);
+
     F2F_FORMAT_ASSERT(internal.itemsCount > 0 && internal.itemsCount <= internal.MaxCount);
-    checkTreeNode(internal.children, internal.itemsCount, state);
+    checkTreeNode(levelsRemain, internal.children, internal.itemsCount, state);
   }
 }
 
@@ -656,16 +690,15 @@ void FileBlocks::checkTreeNode(format::BlockRange const * ranges, uint16_t items
   }
 }
 
-void FileBlocks::checkTreeNode(format::ChildNodeReference const * children, uint16_t itemsCount, CheckState & state) const
+void FileBlocks::checkTreeNode(unsigned levelsRemain, 
+  format::ChildNodeReference const * children, uint16_t itemsCount, CheckState & state) const
 {
   for (int i = 0; i < itemsCount; ++i)
   {
     auto const & child = children[i];
 
     F2F_FORMAT_ASSERT(child.fileOffset == state.filePosition);
-    ++state.level;
-    checkTree(child.childBlockIndex, state);
-    --state.level;
+    checkTree(levelsRemain - 1, child.childBlockIndex, state);
   }
 }
 

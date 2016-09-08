@@ -21,7 +21,7 @@ public:
   typedef std::pair<uint64_t, unsigned int> OffsetAndSize; /* both in blocks */
 
   FileBlocks(BlockStorage &, 
-    format::Inode & inode,
+    format::FileInode & inode,
     bool & m_treeRootBlockIsDirty,
     bool initializeInode = false);
 
@@ -39,7 +39,7 @@ private:
   BlockStorage & m_blockStorage;
   IStorage & m_storage;
   bool & m_treeRootBlockIsDirty;
-  format::Inode & m_inode;
+  format::FileInode & m_inode;
 
   struct Position
   {
@@ -49,32 +49,30 @@ private:
   };
   boost::optional<Position> m_position;
 
-  void seekTree(uint64_t blockIndex, uint64_t nodeBlock);
+  void seekTree(unsigned levelsRemain, uint64_t blockIndex, uint64_t nodeBlock);
   void seekInNode(uint64_t keyBlockIndex, format::BlockRange const * ranges, unsigned itemsCount);
-  void seekInNode(uint64_t keyBlockIndex, format::ChildNodeReference const * children, unsigned itemsCount);
-  std::vector<format::ChildNodeReference> appendToTree(uint64_t numBlocks, uint64_t nodeBlock);
-  std::vector<format::ChildNodeReference> appendToTreeNode(uint64_t numBlocks, format::BlockRangesLeafNode &, bool & isDirty);
-  std::vector<format::ChildNodeReference> appendToTreeNode(uint64_t numBlocks, format::BlockRangesInternalNode &, bool & isDirty);
-  template<class Traits> void appendRootT(uint64_t numBlocks, format::BlockRangesNode &);
+  void seekInNode(unsigned levelsRemain, uint64_t keyBlockIndex, format::ChildNodeReference const * children, unsigned itemsCount);
+  std::vector<format::ChildNodeReference> appendToTree(unsigned levelsRemain, uint64_t numBlocks, uint64_t nodeBlock);
+  std::vector<format::ChildNodeReference> appendToTreeNode(unsigned levelsRemain, uint64_t numBlocks, format::BlockRangesLeafNode &, bool & isDirty);
+  std::vector<format::ChildNodeReference> appendToTreeNode(unsigned levelsRemain, uint64_t numBlocks, format::BlockRangesInternalNode &, bool & isDirty);
+  template<class Traits> void appendRootT(uint64_t numBlocks, typename Traits::NodeType &);
   std::vector<format::ChildNodeReference> createInternalNodes(format::ChildNodeReference const * newChildrenStart, format::ChildNodeReference const * newChildrenEnd);
-  typedef std::function<bool (uint64_t, format::BlockRangesNode const &)> OnNewRootFunc;
-  bool truncateTree(uint64_t newSizeInBlocks, uint64_t nodeBlock, OnNewRootFunc const & onNewRoot);
+  typedef std::function<bool (uint64_t, unsigned, format::BlockRangesLeafNode const *, format::BlockRangesInternalNode const *)> OnNewRootFunc;
+  bool truncateTree(unsigned levelsRemain, uint64_t newSizeInBlocks, uint64_t nodeBlock, OnNewRootFunc const & onNewRoot);
   void truncateTreeNode(uint64_t newSizeInBlocks, format::BlockRange * ranges, uint16_t & itemsCount, bool & isDirty);
-  void truncateTreeNode(uint64_t newSizeInBlocks, format::ChildNodeReference const * children, 
+  void truncateTreeNode(unsigned levelsRemain, uint64_t newSizeInBlocks, format::ChildNodeReference const * children, 
     uint16_t & itemsCount, bool & isDirty, 
     OnNewRootFunc const & onNewRoot);
 
   struct CheckState
   {
-    unsigned level;
     uint64_t filePosition;
-    boost::optional<unsigned> leafLevel;
     boost::optional<uint64_t> lastNextLeafNodeReference;
     std::set<uint64_t> referencedBlocks;
   };
-  void checkTree(uint64_t nodeBlock, CheckState &) const;
+  void checkTree(unsigned levelsRemain, uint64_t nodeBlock, CheckState &) const;
   void checkTreeNode(format::BlockRange const * ranges, uint16_t itemsCount, CheckState &) const;
-  void checkTreeNode(format::ChildNodeReference const * children, uint16_t itemsCount, CheckState &) const;
+  void checkTreeNode(unsigned levelsRemain, format::ChildNodeReference const * children, uint16_t itemsCount, CheckState &) const;
 };
 
 }

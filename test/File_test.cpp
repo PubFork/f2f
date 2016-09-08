@@ -32,8 +32,12 @@ class FileRemainsTest : public ::testing::TestWithParam<int> {
 
 TEST_P(FileRemainsTest, NoRemains2)
 {
+  static const size_t SizeLimit   = sizeof(size_t) == 4 ? 900'000'000 : 5'000'000'000ui64;
+  static const size_t MaxFileSize = sizeof(size_t) == 4 ?   3'000'000 : 5'000'000;
+  static const unsigned CheckPeriod = SizeLimit / MaxFileSize / 50;
+
   f2f::StorageInMemory storage(f2f::OpenMode::read_write);
-  storage.data().reserve(5'000'000'000ui64);
+  storage.data().reserve(SizeLimit * 1.10);
 
   f2f::BlockStorage blockStorage(storage, true);
   std::vector<std::unique_ptr<f2f::File>> files;
@@ -42,10 +46,10 @@ TEST_P(FileRemainsTest, NoRemains2)
   std::vector<std::pair<unsigned, size_t>> log; // <amount written, size after>
   size_t totalSize = 0;
 
-  std::vector<char> buf(5'000'000);
+  std::vector<char> buf(MaxFileSize);
   std::minstd_rand random_engine;
   std::uniform_int_distribution<int> uniform_dist1(1, buf.size());
-  for(int i=0; totalSize < 4'900'000'000ui64; ++i)
+  for(int i=0; totalSize < SizeLimit; ++i)
   {
     for(auto const & file: files)
     {
@@ -66,7 +70,7 @@ TEST_P(FileRemainsTest, NoRemains2)
       EXPECT_EQ(log.back().second, storage.data().size());
       (*it)->seek((*it)->position() - log.back().first);
       (*it)->truncate();
-      if (i%100 == 99)
+      if (i%CheckPeriod == 0)
         (*it)->check();
       log.pop_back();
     }

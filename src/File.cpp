@@ -17,7 +17,8 @@ File::File(BlockStorage & blockStorage)
   , m_position(0)
 {
   checkOpenMode();
-  m_blockStorage.allocateBlocks(1, [this](BlockAddress block) { m_inodeAddress = block; });
+  m_inodeAddress = m_blockStorage.allocateBlock();
+  memset(&m_inode, 0, sizeof(m_inode));
   util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
 }
 
@@ -81,6 +82,7 @@ void File::write(size_t size, char const * buffer)
     m_inode.blocksCount = (m_position + size + format::AddressableBlockSize - 1) / format::AddressableBlockSize;
     if (m_inode.blocksCount > prevBlocksCount)
       m_fileBlocks.append(m_inode.blocksCount - prevBlocksCount);
+    m_inode.fileSize = m_position + size;
   }
 
   processData(size, 

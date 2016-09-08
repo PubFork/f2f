@@ -78,6 +78,13 @@ BlockStorage::BlockStorage(IStorage & storage, bool format)
   }
 }
 
+BlockAddress BlockStorage::allocateBlock()
+{
+  BlockAddress newBlock;
+  allocateBlocks(1, [&newBlock](BlockAddress const & block) { newBlock = block; });
+  return newBlock;
+}
+
 void BlockStorage::allocateBlocks(uint64_t numBlocks, std::function<void (BlockAddress const &)> const & visitor/*, locationHints*/)
 {
   for(uint64_t groupIndex = 0, groupsN = groupsCount(); 
@@ -133,7 +140,7 @@ void BlockStorage::releaseBlocks(uint64_t blockIndex, unsigned numBlocks)
 
   if (blockIndex + numBlocks == m_blocksCount)
   {
-    // Truncate as much as possible including all free block at the end
+    // Truncate as much as possible including all free blocks at the end
     blockIndex = findStartOfFreeBlocksRange(blockIndex);
     truncateStorage(blockIndex);
 

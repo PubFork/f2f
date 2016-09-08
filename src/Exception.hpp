@@ -27,6 +27,14 @@ struct InvalidFormatError: public std::runtime_error
   {}
 };
 
+struct FileExistsError : public std::runtime_error
+{
+  explicit FileExistsError()
+    : runtime_error("File with same name already exists in directory")
+  {}
+};
+
+
 [[noreturn]]
 inline void ThrowInvalidFormat(const char * description)
 {

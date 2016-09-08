@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 #include <random>
 #include <memory>
-#include <fstream>
 
 #include "BlockStorage.hpp"
 #include "StorageInMemory.hpp"
@@ -126,22 +125,18 @@ TEST(BlockStorage, Random_Slow)
           break;
       }
       
-      //auto saved_data = storage.data();
       blockStorage->releaseBlocks(block, nBlocksToRelease);
       allocated.erase(it, endIt);
 
-      std::vector<f2f::BlockAddress> checkAllocated;
-      checkAllocated.reserve(allocated.size());
-      blockStorage->enumerateAllocatedBlocks([&checkAllocated](f2f::BlockAddress const & block)
+      if (i%100 == 0)
       {
-        checkAllocated.push_back(block);
-      });
-      if (!std::equal(allocated.begin(), allocated.end(), checkAllocated.begin(), checkAllocated.end()))
-      {
-        /*std::ofstream ofs("allocated_fail.data", std::ios_base::binary);
-        ofs.write(saved_data.data(), saved_data.size());
-        std::cout << "releaseBlocks " << block << std::endl;*/
-        GTEST_FAIL();
+        std::vector<f2f::BlockAddress> checkAllocated;
+        checkAllocated.reserve(allocated.size());
+        blockStorage->enumerateAllocatedBlocks([&checkAllocated](f2f::BlockAddress const & block)
+        {
+          checkAllocated.push_back(block);
+        });
+        EXPECT_TRUE(std::equal(allocated.begin(), allocated.end(), checkAllocated.begin(), checkAllocated.end()));
       }
     }
     else
@@ -152,18 +147,15 @@ TEST(BlockStorage, Random_Slow)
         EXPECT_TRUE(allocated.insert(block).second);
       });
 
-      std::vector<f2f::BlockAddress> checkAllocated;
-      checkAllocated.reserve(allocated.size());
-      blockStorage->enumerateAllocatedBlocks([&checkAllocated](f2f::BlockAddress const & block)
+      if (i % 100 == 0)
       {
-        checkAllocated.push_back(block);
-      });
-      if (!std::equal(allocated.begin(), allocated.end(), checkAllocated.begin(), checkAllocated.end()))
-      {
-        /*std::ofstream ofs("allocated_fail.data", std::ios_base::binary);
-        ofs.write(saved_data.data(), saved_data.size());
-        std::cout << "allocateBlocks" << std::endl;*/
-        GTEST_FAIL();
+        std::vector<f2f::BlockAddress> checkAllocated;
+        checkAllocated.reserve(allocated.size());
+        blockStorage->enumerateAllocatedBlocks([&checkAllocated](f2f::BlockAddress const & block)
+        {
+          checkAllocated.push_back(block);
+        });
+        EXPECT_TRUE(std::equal(allocated.begin(), allocated.end(), checkAllocated.begin(), checkAllocated.end()));
       }
     }
   }
