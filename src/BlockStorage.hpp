@@ -1,7 +1,7 @@
 #pragma once
 
 #include <boost/optional.hpp>
-#include "IStorage.hpp"
+#include "f2f/IStorage.hpp"
 #include "Format/BlockStorage.hpp"
 
 namespace f2f
@@ -23,6 +23,11 @@ public:
   bool operator==(BlockAddress const & rhs) const
   { 
     return m_blockIndex == rhs.m_blockIndex; 
+  }
+
+  bool operator<(BlockAddress const & rhs) const
+  {
+    return m_blockIndex < rhs.m_blockIndex;
   }
 
 private:

@@ -9,7 +9,7 @@
 
 TEST(File, NoRemains1)
 {
-  f2f::StorageInMemory storage(f2f::OpenMode::read_write);
+  f2f::StorageInMemory storage;
   f2f::BlockStorage blockStorage(storage, true);
   f2f::File file1(blockStorage);
   f2f::File file2(blockStorage);
@@ -36,7 +36,7 @@ TEST_P(FileRemainsTest, NoRemains2)
   static const size_t MaxFileSize = sizeof(size_t) == 4 ?   3'000'000 : 5'000'000;
   static const unsigned CheckPeriod = SizeLimit / MaxFileSize / 50;
 
-  f2f::StorageInMemory storage(f2f::OpenMode::read_write);
+  f2f::StorageInMemory storage;
   storage.data().reserve(SizeLimit * 1.10);
 
   f2f::BlockStorage blockStorage(storage, true);

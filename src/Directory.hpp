@@ -12,14 +12,18 @@ typedef std::string utf8string_t;
 class Directory
 {
 public:
-  Directory(BlockStorage &);
-  Directory(BlockStorage &, BlockAddress const & inodeAddress, OpenMode openMode);
+  static const BlockAddress NoParentDirectory;
+
+  Directory(BlockStorage &, BlockAddress const & parentAddress); // Create directory
+  Directory(BlockStorage &, BlockAddress const & inodeAddress, OpenMode openMode); // Open directory
 
   BlockAddress inodeAddress() const { return m_inodeAddress; }
 
-  void clear();
-  void addFile(uint64_t inode, utf8string_t const & fileName);
-  boost::optional<uint64_t> searchFile(utf8string_t const & fileName) const;
+  typedef std::function<void (BlockAddress, FileType)> OnDeleteFileFunc_t;
+  void remove(OnDeleteFileFunc_t const &);
+  void addFile(BlockAddress inode, FileType, utf8string_t const & fileName);
+  boost::optional<std::pair<BlockAddress, FileType>> searchFile(utf8string_t const & fileName) const;
+  boost::optional<std::pair<BlockAddress, FileType>> removeFile(utf8string_t const & fileName) const;
 
   void moveFirst();
   void moveNext();
@@ -57,8 +61,8 @@ private:
     format::DirectoryTreeLeafItem & head, uint16_t & dataSize, unsigned maxSize, bool & isDirty);
   static unsigned getSizeOfLeafRecord(utf8string_t const & fileName);
 
-  void removeNode(format::DirectoryTreeChildNodeReference const * children, unsigned itemsCount, unsigned levelsRemain);
-  void removeNode(format::DirectoryTreeLeafItem const & head, unsigned dataSize);
+  void removeNode(OnDeleteFileFunc_t const &, format::DirectoryTreeChildNodeReference const * children, unsigned itemsCount, unsigned levelsRemain);
+  void removeNode(OnDeleteFileFunc_t const &, format::DirectoryTreeLeafItem const & head, unsigned dataSize);
 
   struct CheckState
   {

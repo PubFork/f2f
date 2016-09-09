@@ -15,7 +15,7 @@ struct BlockAddressLess
 
 TEST(BlockStorage, T1)
 {
-  f2f::StorageInMemory storage(f2f::OpenMode::read_write);
+  f2f::StorageInMemory storage;
   {
     f2f::BlockStorage blockStorage(storage, true);
 
@@ -36,7 +36,7 @@ TEST(BlockStorage, T1)
 
 TEST(BlockStorage, T2)
 {
-  f2f::StorageInMemory storage(f2f::OpenMode::read_write);
+  f2f::StorageInMemory storage;
   {
     f2f::BlockStorage blockStorage(storage, true);
 
@@ -57,7 +57,7 @@ TEST(BlockStorage, T2)
 
 TEST(BlockStorage, T3)
 {
-  f2f::StorageInMemory storage(f2f::OpenMode::read_write);
+  f2f::StorageInMemory storage;
   {
     f2f::BlockStorage blockStorage(storage, true);
 
@@ -92,7 +92,7 @@ TEST(BlockStorage, T3)
 
 TEST(BlockStorage, Random_Slow)
 {
-  f2f::StorageInMemory storage(f2f::OpenMode::read_write);
+  f2f::StorageInMemory storage;
 
   std::set<f2f::BlockAddress, BlockAddressLess> allocated;
   std::unique_ptr<f2f::BlockStorage> blockStorage(new f2f::BlockStorage(storage, true));

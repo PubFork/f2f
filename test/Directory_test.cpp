@@ -43,9 +43,9 @@ TEST(Directory, T1)
 
   for(int repeat = 0; repeat < 100; ++repeat)
   {
-    f2f::StorageInMemory storage(f2f::OpenMode::read_write);
+    f2f::StorageInMemory storage;
     std::unique_ptr<f2f::BlockStorage> blockStorage(new f2f::BlockStorage(storage, true));
-    std::unique_ptr<f2f::Directory> directory(new f2f::Directory(*blockStorage));
+    std::unique_ptr<f2f::Directory> directory(new f2f::Directory(*blockStorage, f2f::Directory::NoParentDirectory));
   
     std::uniform_int_distribution<> collision_dist(0, 100'000);
     std::map<std::string, uint64_t> items;
@@ -71,7 +71,7 @@ TEST(Directory, T1)
 
       auto ins = items.insert(std::make_pair(name, i));
       if (ins.second)
-        directory->addFile(i, name);
+        directory->addFile(f2f::BlockAddress::fromBlockIndex(i), f2f::FileType::Regular, name);
 
       if (i%1000 == 999)
         directory->check();
@@ -84,7 +84,7 @@ TEST(Directory, T1)
         if (collision_dist(random_engine) < 50'000)
           blockStorage.reset(new f2f::BlockStorage(storage));
 
-        directory.reset(new f2f::Directory(*blockStorage, inodeIndex, f2f::OpenMode::read_write));
+        directory.reset(new f2f::Directory(*blockStorage, inodeIndex, f2f::OpenMode::ReadWrite));
       }
     }
 
@@ -92,7 +92,7 @@ TEST(Directory, T1)
     {
       auto res = directory->searchFile(item.first);
       ASSERT_TRUE(res);
-      EXPECT_EQ(item.second, *res);
+      EXPECT_EQ(item.second, res->first.index());
     }
   }
   /*directory.clear();

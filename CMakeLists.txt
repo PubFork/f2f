@@ -2,15 +2,11 @@ cmake_minimum_required (VERSION 2.8)
 
 project(f2f)
 
-# Search packages for host system instead of packages for target system
-# in case of cross compilation these macro should be defined by toolchain file
-if(NOT COMMAND find_host_package)
-  macro(find_host_package)
-    find_package(${ARGN})
-  endmacro()
-endif()
+set(Boost_USE_STATIC_LIBS        ON) # only find static libs
+set(Boost_USE_MULTITHREADED      ON)
+set(Boost_USE_STATIC_RUNTIME    OFF)
 
-find_host_package(Boost REQUIRED)
+find_package(Boost REQUIRED COMPONENTS filesystem)
 
 include_directories(
   ${Boost_INCLUDE_DIRS}
@@ -48,13 +44,16 @@ set(UTIL_SOURCES
 source_group("util" FILES ${UTIL_SOURCES})
 
 set(SOURCES
-  src/IStorage.hpp 
   src/BlockStorage.hpp 
   src/BlockStorage.cpp 
   src/FileBlocks.hpp 
   src/FileBlocks.cpp 
   src/File.hpp 
   src/File.cpp 
+  src/FileDescriptorImpl.hpp 
+  src/FileDescriptor.cpp 
+  src/FileSystemImpl.hpp 
+  src/FileSystem.cpp 
   src/Directory.hpp 
   src/Directory.cpp 
   src/Exception.hpp
@@ -62,11 +61,28 @@ set(SOURCES
 
 source_group("sources" FILES ${SOURCES})
 
-add_library(f2f
+set(API_SOURCES
+  include/f2f/Common.hpp
+  include/f2f/Defs.hpp
+  include/f2f/FileSystem.hpp 
+  include/f2f/FileDescriptor.hpp 
+  include/f2f/IStorage.hpp 
+)
+
+source_group("API" FILES ${API_SOURCES})
+
+add_library(f2f SHARED
+  ${API_SOURCES}
   ${FORMAT_SOURCES}
   ${UTIL_SOURCES}
   ${SOURCES}
 )
+
+target_compile_definitions(f2f
+  PRIVATE F2F_API_EXPORTS
+)
+
+target_link_libraries(f2f ${Boost_LIBRARIES})
 
 set(TEST_SOURCES
   test/Algorithm_test.cpp 
@@ -74,17 +90,28 @@ set(TEST_SOURCES
   test/BlockStorage_test.cpp 
   test/Directory_test.cpp 
   test/File_test.cpp 
-  test/StorageInMemory.hpp 
-  test/StorageInMemory.cpp 
 )
 
 source_group("test" FILES ${TEST_SOURCES})
 
-add_executable(f2f_test
+set(TEST_UTIL_SOURCES
+  test/StorageInMemory.hpp 
+  test/StorageInMemory.cpp 
+)
+
+source_group("util" FILES ${TEST_UTIL_SOURCES})
+
+set(GTEST_SOURCES
   3rdparty/gtest/src/gtest_main.cc 
   3rdparty/gtest/src/gtest-all.cc 
+)
 
+source_group("gtest" FILES ${GTEST_SOURCES})
+
+add_executable(f2f_unittest
+  ${GTEST_SOURCES}
   ${TEST_SOURCES}
+  ${TEST_UTIL_SOURCES}
 
   src/BlockStorage.hpp 
   src/BlockStorage.cpp 
@@ -96,8 +123,29 @@ add_executable(f2f_test
   src/Directory.cpp 
 )
 
-target_include_directories(f2f_test
+target_include_directories(f2f_unittest
   PRIVATE 3rdparty/gtest/include
   PRIVATE 3rdparty/gtest
   PRIVATE src
+)
+
+set(API_TEST_SOURCES
+  test/FileSystem_test.cpp 
+)
+
+source_group("test" FILES ${API_TEST_SOURCES})
+
+add_executable(f2f_API_test
+  ${GTEST_SOURCES}
+  ${API_TEST_SOURCES}
+  ${TEST_UTIL_SOURCES}
+)
+
+target_include_directories(f2f_API_test
+  PRIVATE 3rdparty/gtest/include
+  PRIVATE 3rdparty/gtest
+)
+
+target_link_libraries(f2f_API_test
+  PRIVATE f2f
 )

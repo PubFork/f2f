@@ -14,11 +14,13 @@ public:
   File(BlockStorage &); // Create file
   File(BlockStorage &, BlockAddress const & inodeAddress, OpenMode openMode); // Open file
 
+  BlockAddress inodeAddress() const { return m_inodeAddress; }
+
   void remove();
   void seek(uint64_t position);
   uint64_t position() const { return m_position; }
-  void read(size_t & inOutSize, char * buffer);
-  void write(size_t size, char const * buffer);
+  void read(size_t & inOutSize, void * buffer);
+  void write(size_t size, void const * buffer);
   void truncate();
 
   // Diagnostics

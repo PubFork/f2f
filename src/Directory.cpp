@@ -2,7 +2,6 @@
 
 #include "Directory.hpp"
 #include "Exception.hpp"
-#include "File.hpp"
 #include "util/StorageT.hpp"
 #include "util/FNVHash.hpp"
 #include "util/Algorithm.hpp"
@@ -76,10 +75,12 @@ typedef DirectoryTreeLeafItemIteratorT<format::DirectoryTreeLeafItem const> Dire
 
 } // anonymous namespace
 
-Directory::Directory(BlockStorage & blockStorage)
+const BlockAddress Directory::NoParentDirectory = BlockAddress::fromBlockIndex(std::numeric_limits<uint64_t>::max());
+
+Directory::Directory(BlockStorage & blockStorage, BlockAddress const & parentAddress)
   : m_blockStorage(blockStorage)
   , m_storage(blockStorage.storage())
-  , m_openMode(OpenMode::read_write)
+  , m_openMode(OpenMode::ReadWrite)
 {
   checkOpenMode();
 
@@ -87,6 +88,10 @@ Directory::Directory(BlockStorage & blockStorage)
   memset(&m_inode, 0, sizeof(m_inode));
   m_inode.levelsCount = 0;
   m_inode.directReferences.dataSize = 0;
+  addFile(
+    parentAddress == NoParentDirectory ? m_inodeAddress : parentAddress,
+    FileType::Directory,
+    "..");
   util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
 }
 
@@ -108,7 +113,7 @@ Directory::Directory(BlockStorage & blockStorage, BlockAddress const & inodeAddr
 
 void Directory::checkOpenMode()
 {
-  if (m_openMode == OpenMode::read_write && m_storage.openMode() == OpenMode::read_only)
+  if (m_openMode == OpenMode::ReadWrite && m_storage.openMode() == OpenMode::ReadOnly)
     throw OpenModeError("Can't open for write: storage is in in read-only mode ");
 }
 
@@ -124,12 +129,13 @@ void Directory::read(BlockAddress blockIndex, format::DirectoryTreeLeaf & leaf) 
   F2F_FORMAT_ASSERT(leaf.dataSize <= leaf.MaxDataSize);
 }
 
-boost::optional<uint64_t> Directory::searchFile(utf8string_t const & fileName) const
+boost::optional<std::pair<BlockAddress, FileType>> Directory::searchFile(utf8string_t const & fileName) const
 {
   NameHash_t nameHash = util::HashFNV1a_32(fileName.data(), fileName.data() + fileName.size());
+  boost::optional<uint64_t> result;
   if (m_inode.levelsCount > 0)
   {
-    return searchInNode(
+    result = searchInNode(
       nameHash, 
       fileName, 
       m_inode.levelsCount, 
@@ -138,12 +144,20 @@ boost::optional<uint64_t> Directory::searchFile(utf8string_t const & fileName) c
   }
   else
   {
-    return searchInNode(
+    result = searchInNode(
       nameHash,
       fileName,
       m_inode.directReferences.head,
       m_inode.directReferences.dataSize);
   }
+  if (result)
+    return std::make_pair(
+      BlockAddress::fromBlockIndex(*result & ~format::DirectoryTreeLeafItem::DirectoryFlag), 
+      (*result & format::DirectoryTreeLeafItem::DirectoryFlag) 
+        ? FileType::Directory 
+        : FileType::Regular);
+  else
+    return {};
 }
 
 boost::optional<uint64_t> Directory::searchInNode(NameHash_t nameHash, 
@@ -314,7 +328,9 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
     if (nameHash == position->nameHash
       && position->nameSize == fileName.size()
       && std::equal(position->name, position->name + position->nameSize, fileName.begin(), fileName.end()))
-      throw FileExistsError();
+      throw FileExistsError(position->inode & format::DirectoryTreeLeafItem::DirectoryFlag
+        ? FileType::Directory
+        : FileType::Regular);
   }
 
   auto insertSize = getSizeOfLeafRecord(fileName);
@@ -428,10 +444,24 @@ unsigned Directory::getSizeOfLeafRecord(utf8string_t const & fileName)
   return offsetof(format::DirectoryTreeLeafItem, name) + fileName.size();
 }
 
-void Directory::addFile(uint64_t inode, utf8string_t const & fileName)
+void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string_t const & fileName)
 {
-  if (m_openMode == OpenMode::read_only)
+  if (m_openMode == OpenMode::ReadOnly)
     throw OpenModeError("Can't modify: directory is opened as read-only");
+
+  uint64_t inode;
+  switch (fileType)
+  {
+  case f2f::FileType::Regular:
+    inode = inodeAddress.index();
+    break;
+  case f2f::FileType::Directory:
+    inode = inodeAddress.index() | format::DirectoryTreeLeafItem::DirectoryFlag;
+    break;
+  default:
+    assert(false);
+    return;
+  }
 
   bool inodeIsDirty = false;
 
@@ -520,21 +550,20 @@ void Directory::addFile(uint64_t inode, utf8string_t const & fileName)
     util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
 }
 
-void Directory::clear()
+void Directory::remove(OnDeleteFileFunc_t const & onDeleteFile)
 {
-  if (m_openMode == OpenMode::read_only)
+  if (m_openMode == OpenMode::ReadOnly)
     throw OpenModeError("Can't remove: directory is opened as read-only");
 
   if (m_inode.levelsCount == 0)
-    removeNode(m_inode.directReferences.head, m_inode.directReferences.dataSize);
+    removeNode(onDeleteFile, m_inode.directReferences.head, m_inode.directReferences.dataSize);
   else
-    removeNode(m_inode.indirectReferences.children, m_inode.indirectReferences.itemsCount, m_inode.levelsCount);
-  m_inode.levelsCount = 0;
-  m_inode.directReferences.dataSize = 0;
-  util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
+    removeNode(onDeleteFile, m_inode.indirectReferences.children, m_inode.indirectReferences.itemsCount, m_inode.levelsCount);
+
+  m_blockStorage.releaseBlocks(m_inodeAddress, 1);
 }
 
-void Directory::removeNode(format::DirectoryTreeChildNodeReference const * children, unsigned itemsCount, unsigned levelsRemain)
+void Directory::removeNode(OnDeleteFileFunc_t const & onDeleteFile, format::DirectoryTreeChildNodeReference const * children, unsigned itemsCount, unsigned levelsRemain)
 {
   for(unsigned i = 0; i < itemsCount; ++i)
   {
@@ -542,24 +571,27 @@ void Directory::removeNode(format::DirectoryTreeChildNodeReference const * child
     {
       format::DirectoryTreeLeaf leaf;
       read(BlockAddress::fromBlockIndex(children[i].childBlockIndex), leaf);
-      removeNode(leaf.head, leaf.dataSize);
+      removeNode(onDeleteFile, leaf.head, leaf.dataSize);
     }
     else
     {
       format::DirectoryTreeInternalNode internalNode;
       read(BlockAddress::fromBlockIndex(children[i].childBlockIndex), internalNode);
-      removeNode(internalNode.children, internalNode.itemsCount, levelsRemain - 1);
+      removeNode(onDeleteFile, internalNode.children, internalNode.itemsCount, levelsRemain - 1);
     }
     m_blockStorage.releaseBlocks(BlockAddress::fromBlockIndex(children[i].childBlockIndex), 1);
   }
 }
 
-void Directory::removeNode(format::DirectoryTreeLeafItem const & head, unsigned dataSize)
+void Directory::removeNode(OnDeleteFileFunc_t const & onDeleteFile, format::DirectoryTreeLeafItem const & head, unsigned dataSize)
 {
   for (DirectoryTreeLeafItemConstIterator item(head, dataSize); !item.atEnd(); ++item)
   {
-    File file(m_blockStorage, BlockAddress::fromBlockIndex(item->inode), OpenMode::read_write);
-    file.remove();
+    onDeleteFile(
+      BlockAddress::fromBlockIndex(item->inode & ~format::DirectoryTreeLeafItem::DirectoryFlag), 
+      (item->inode & format::DirectoryTreeLeafItem::DirectoryFlag)
+        ? FileType::Directory
+        : FileType::Regular);
   }
 }
 

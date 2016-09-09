@@ -6,12 +6,10 @@
 namespace f2f
 {
 
-/* TODO: Save dirty inodes */
-
 File::File(BlockStorage & blockStorage)
   : m_storage(blockStorage.storage())
   , m_blockStorage(blockStorage)
-  , m_openMode(OpenMode::read_write)
+  , m_openMode(OpenMode::ReadWrite)
   , m_inode()
   , m_fileBlocks(blockStorage, m_inode, m_inodeTreeRootIsDirty, true)
   , m_position(0)
@@ -19,7 +17,7 @@ File::File(BlockStorage & blockStorage)
   checkOpenMode();
   m_inodeAddress = m_blockStorage.allocateBlock();
   memset(&m_inode, 0, sizeof(m_inode));
-  util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
+  util::writeT(m_storage, m_inodeAddress, m_inode);
 }
 
 File::File(BlockStorage & blockStorage, BlockAddress const & inodeAddress, OpenMode openMode)
@@ -36,7 +34,7 @@ File::File(BlockStorage & blockStorage, BlockAddress const & inodeAddress, OpenM
 
 void File::checkOpenMode()
 {
-  if (m_openMode == OpenMode::read_write && m_storage.openMode() == OpenMode::read_only)
+  if (m_openMode == OpenMode::ReadWrite && m_storage.openMode() == OpenMode::ReadOnly)
     throw OpenModeError("Can't open for write: storage is in in read-only mode ");
 }
 
@@ -48,11 +46,10 @@ void File::remove()
 
 void File::seek(uint64_t position)
 {
-  // TODO: reserve space?
   m_position = position;
 }
 
-void File::read(size_t & inOutSize, char * buffer)
+void File::read(size_t & inOutSize, void * buffer)
 {
   size_t const availableSize = size_t(std::min(uint64_t(inOutSize), m_inode.fileSize - m_position));
   inOutSize = 0;
@@ -62,15 +59,15 @@ void File::read(size_t & inOutSize, char * buffer)
   processData(availableSize,
     [this, &buffer](uint64_t offset, unsigned int size){
       m_storage.read(offset, size, buffer);
-      buffer += size;
+      reinterpret_cast<char *&>(buffer) += size;
     });
 
   inOutSize = size_t(availableSize);
 }
 
-void File::write(size_t size, char const * buffer)
+void File::write(size_t size, void const * buffer)
 {
-  if (m_openMode == OpenMode::read_only)
+  if (m_openMode == OpenMode::ReadOnly)
     throw OpenModeError("Can't write: file is opened as read-only");
   if (size > m_storage.sizeLimit() - m_position)
     throw std::runtime_error("Size limit");
@@ -83,12 +80,13 @@ void File::write(size_t size, char const * buffer)
     if (m_inode.blocksCount > prevBlocksCount)
       m_fileBlocks.append(m_inode.blocksCount - prevBlocksCount);
     m_inode.fileSize = m_position + size;
+    util::writeT(m_storage, m_inodeAddress, m_inode);
   }
 
   processData(size, 
     [this, &buffer](uint64_t offset, unsigned int size){
       m_storage.write(offset, size, buffer);
-      buffer += size;
+      reinterpret_cast<const char *&>(buffer) += size;
     });
 }
 
@@ -123,11 +121,15 @@ void File::processData(size_t size, std::function<void (uint64_t, unsigned int)>
 
 void File::truncate()
 {
-  m_inode.fileSize = m_position;
-  auto prevBlocksCount = m_inode.blocksCount;
-  m_inode.blocksCount = util::FloorDiv(m_position, format::AddressableBlockSize);
-  if (m_inode.blocksCount != prevBlocksCount)
-    m_fileBlocks.truncate(m_inode.blocksCount);
+  if (m_inode.fileSize > m_position)
+  {
+    auto prevBlocksCount = m_inode.blocksCount;
+    m_inode.blocksCount = util::FloorDiv(m_position, format::AddressableBlockSize);
+    if (m_inode.blocksCount != prevBlocksCount)
+      m_fileBlocks.truncate(m_inode.blocksCount);
+    m_inode.fileSize = m_position;
+    util::writeT(m_storage, m_inodeAddress, m_inode);
+  }
 }
 
 void File::check() const
