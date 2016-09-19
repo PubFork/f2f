@@ -30,12 +30,21 @@ File::File(BlockStorage & blockStorage, BlockAddress const & inodeAddress, OpenM
 {
   checkOpenMode();
   util::readT(m_storage, inodeAddress, m_inode);
+
+  uint64_t blocksSize = m_inode.blocksCount * format::AddressableBlockSize;
+  F2F_FORMAT_ASSERT(blocksSize >= m_inode.fileSize);
+  F2F_FORMAT_ASSERT(blocksSize - m_inode.fileSize < format::AddressableBlockSize);
 }
 
 void File::checkOpenMode()
 {
   if (m_openMode == OpenMode::ReadWrite && m_storage.openMode() == OpenMode::ReadOnly)
     throw OpenModeError("Can't open for write: storage is in in read-only mode ");
+}
+
+uint64_t File::size() const
+{
+  return m_inode.fileSize;
 }
 
 void File::remove()

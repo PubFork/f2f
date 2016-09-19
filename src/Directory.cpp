@@ -6,12 +6,6 @@
 #include "util/FNVHash.hpp"
 #include "util/Algorithm.hpp"
 
-/*
-
-TODO: Link leaf nodes
-
-*/
-
 namespace f2f
 {
 
@@ -86,12 +80,10 @@ Directory::Directory(BlockStorage & blockStorage, BlockAddress const & parentAdd
 
   m_inodeAddress = m_blockStorage.allocateBlock();
   memset(&m_inode, 0, sizeof(m_inode));
+  m_inode.parentDirectoryInode = 
+    parentAddress == NoParentDirectory ? m_inodeAddress.index() : parentAddress.index();
   m_inode.levelsCount = 0;
   m_inode.directReferences.dataSize = 0;
-  addFile(
-    parentAddress == NoParentDirectory ? m_inodeAddress : parentAddress,
-    FileType::Directory,
-    "..");
   util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
 }
 
@@ -117,6 +109,11 @@ void Directory::checkOpenMode()
     throw OpenModeError("Can't open for write: storage is in in read-only mode ");
 }
 
+BlockAddress Directory::parentInodeAddress() const
+{
+  return BlockAddress::fromBlockIndex(m_inode.parentDirectoryInode);
+}
+
 void Directory::read(BlockAddress blockIndex, format::DirectoryTreeInternalNode & internalNode) const
 {
   util::readT(m_storage, blockIndex, internalNode);
@@ -131,6 +128,10 @@ void Directory::read(BlockAddress blockIndex, format::DirectoryTreeLeaf & leaf) 
 
 boost::optional<std::pair<BlockAddress, FileType>> Directory::searchFile(utf8string_t const & fileName) const
 {
+  static const std::string ParentDirectoryName("..");
+  if (fileName == ParentDirectoryName)
+    return std::make_pair(parentInodeAddress(), FileType::Directory);
+
   NameHash_t nameHash = util::HashFNV1a_32(fileName.data(), fileName.data() + fileName.size());
   boost::optional<uint64_t> result;
   if (m_inode.levelsCount > 0)
@@ -164,9 +165,6 @@ boost::optional<uint64_t> Directory::searchInNode(NameHash_t nameHash,
   utf8string_t const & fileName, unsigned levelsRemain, 
   format::DirectoryTreeChildNodeReference const * children, unsigned itemsCount) const
 {
-  if (children[0].nameHash > nameHash) // Makes sense only for root node
-    return {};
-
   auto position = std::lower_bound(
     children + 1,
     children + itemsCount,
@@ -234,7 +232,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
     read(blockIndex, leaf);
     bool isDirty = false;
     newChildren = insertInNode(inode, nameHash, fileName, 
-      leaf.head, leaf.dataSize, format::DirectoryTreeLeaf::MaxDataSize, isDirty);
+      leaf.head, leaf.nextLeafNode, leaf.dataSize, format::DirectoryTreeLeaf::MaxDataSize, isDirty);
     if (isDirty)
       util::writeT(m_storage, blockIndex, leaf);
   }
@@ -320,7 +318,9 @@ boost::optional<format::DirectoryTreeChildNodeReference> Directory::insertInNode
 std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
   uint64_t inode,
   NameHash_t nameHash, utf8string_t const & fileName,
-  format::DirectoryTreeLeafItem & head, uint16_t & dataSize, unsigned maxSize, bool & isDirty)
+  format::DirectoryTreeLeafItem & head, 
+  uint64_t & nextLeafNode,
+  uint16_t & dataSize, unsigned maxSize, bool & isDirty)
 {
   DirectoryTreeLeafItemIterator position(head, dataSize);
   for(;!position.atEnd() && nameHash >= position->nameHash; ++position)
@@ -393,6 +393,8 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
       auto splitBy = (afterMid < sumSize - beforeMid) ? afterMid : beforeMid;
       BlockAddress newBlock = m_blockStorage.allocateBlock();
       format::DirectoryTreeLeaf newLeaf;
+      newLeaf.nextLeafNode = nextLeafNode;
+      nextLeafNode = newBlock.index();
       newLeaf.dataSize = sumSize - splitBy;
       memcpy(&newLeaf.head, sumData + splitBy, newLeaf.dataSize);
       util::writeT(m_storage, newBlock.absoluteAddress(), newLeaf);
@@ -413,6 +415,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
 
       // 1st new block
       format::DirectoryTreeLeaf newLeaf;
+      newLeaf.nextLeafNode = newBlock2.index();
       newLeaf.dataSize = afterMid - beforeMid;
       memcpy(&newLeaf.head, sumData + beforeMid, newLeaf.dataSize);
       util::writeT(m_storage, newBlock1.absoluteAddress(), newLeaf);
@@ -423,6 +426,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
       newLeafsReferences.push_back(reference);
 
       // 2nd new block
+      newLeaf.nextLeafNode = nextLeafNode;
       newLeaf.dataSize = sumSize - afterMid;
       memcpy(&newLeaf.head, sumData + afterMid, newLeaf.dataSize);
       util::writeT(m_storage, newBlock2.absoluteAddress(), newLeaf);
@@ -431,6 +435,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
       reference.nameHash = newLeaf.head.nameHash;
       newLeafsReferences.push_back(reference);
 
+      nextLeafNode = newBlock1.index();
       dataSize = beforeMid;
       memcpy(&head, sumData, dataSize);
       isDirty = true;
@@ -474,12 +479,14 @@ void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string
       // Not enough space in root. Need to move root contents and new item into child nodes
       BlockAddress newBlock = m_blockStorage.allocateBlock();
       format::DirectoryTreeLeaf newLeaf;
+      newLeaf.nextLeafNode = format::DirectoryTreeLeaf::NoNextLeaf;
       newLeaf.dataSize = m_inode.directReferences.dataSize;
       memcpy(&newLeaf.head, &m_inode.directReferences.head, m_inode.directReferences.dataSize);
 
       bool isNewLeafDirty;
       std::vector<format::DirectoryTreeChildNodeReference> newChildrenReferences = insertInNode(
-        inode, nameHash, fileName, newLeaf.head, newLeaf.dataSize, newLeaf.MaxDataSize, isNewLeafDirty);
+        inode, nameHash, fileName, 
+        newLeaf.head, newLeaf.nextLeafNode, newLeaf.dataSize, newLeaf.MaxDataSize, isNewLeafDirty);
 
       util::writeT(m_storage, newBlock.absoluteAddress(), newLeaf);
       m_inode.levelsCount = 1;
@@ -497,9 +504,11 @@ void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string
     }
     else
     {
+      uint64_t nextLeafNode = 0; // shouldn't be used
       std::vector<format::DirectoryTreeChildNodeReference> newChildrenReferences = insertInNode(
         inode, nameHash, fileName, 
         m_inode.directReferences.head, 
+        nextLeafNode,
         m_inode.directReferences.dataSize,
         m_inode.directReferences.MaxDataSize,
         inodeIsDirty);
@@ -550,6 +559,135 @@ void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string
     util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
 }
 
+boost::optional<uint64_t> Directory::removeFromNode(NameHash_t nameHash, utf8string_t const & fileName,
+  unsigned levelsRemain, BlockAddress blockIndex)
+{
+  boost::optional<uint64_t> removedInode;
+  if (levelsRemain == 0)
+  {
+    format::DirectoryTreeLeaf leaf;
+    read(blockIndex, leaf);
+    bool isDirty = false;
+    removedInode = removeFromNode(nameHash, fileName,
+      leaf.head, leaf.dataSize, isDirty);
+    if (isDirty)
+      util::writeT(m_storage, blockIndex, leaf);
+  }
+  else
+  {
+    format::DirectoryTreeInternalNode internalNode;
+    read(blockIndex, internalNode);
+    bool isDirty = false;
+    removedInode = removeFromNode(nameHash, fileName, levelsRemain, internalNode.children,
+      internalNode.itemsCount, isDirty);
+    if (isDirty)
+      util::writeT(m_storage, blockIndex, internalNode);
+  }
+  return removedInode;
+}
+
+boost::optional<uint64_t> Directory::removeFromNode(
+  NameHash_t nameHash, utf8string_t const & fileName,
+  unsigned levelsRemain, format::DirectoryTreeChildNodeReference * children,
+  uint16_t & itemsCount, bool & isDirty)
+{
+  auto position = std::lower_bound(
+    children + 1,
+    children + itemsCount,
+    nameHash,
+    [](format::DirectoryTreeChildNodeReference const & child, NameHash_t nameHash) -> bool 
+    {
+      return child.nameHash < nameHash;
+    }
+  );
+  // Key value "K" may be both in branch with "K" key and in previous branch too due to 
+  // way how duplicates are handled
+  --position;
+  // In case of hash collision and long file names more than one branch may contain same hash
+  for(; position != children + itemsCount && (position == children || nameHash >= position->nameHash); ++position)
+    if (boost::optional<uint64_t> result = removeFromNode(
+        nameHash, fileName, levelsRemain - 1, 
+        BlockAddress::fromBlockIndex(position->childBlockIndex)))
+      return result;
+  return {};
+}
+
+boost::optional<uint64_t> Directory::removeFromNode(
+  NameHash_t nameHash, utf8string_t const & fileName,
+  format::DirectoryTreeLeafItem & head, uint16_t & dataSize, bool & isDirty)
+{
+  for (DirectoryTreeLeafItemConstIterator item(head, dataSize);
+    !item.atEnd() && nameHash >= item->nameHash;
+    ++item)
+  {
+    if (nameHash == item->nameHash
+      && item->nameSize == fileName.size()
+      && std::equal(item->name, item->name + item->nameSize, fileName.begin(), fileName.end()))
+    {
+      auto inode = item->inode;
+
+      auto offset = item.offsetInBytes();
+      ++item;
+      if (item.atEnd())
+      {
+        // Removing last item - just change dataSize field
+        dataSize = offset; 
+      }
+      else
+      {
+        auto removedSize = item.offsetInBytes() - offset;
+        memmove(
+          reinterpret_cast<char *>(&head) + offset, 
+          reinterpret_cast<char *>(&head) + item.offsetInBytes(),
+          dataSize - item.offsetInBytes()
+          );
+        dataSize -= removedSize;
+      }
+
+      return inode;
+    }
+  }
+  return {};
+}
+
+boost::optional<std::pair<BlockAddress, FileType>> Directory::removeFile(utf8string_t const & fileName) 
+{
+  if (m_openMode == OpenMode::ReadOnly)
+    throw OpenModeError("Can't modify: directory is opened as read-only");
+
+  bool inodeIsDirty = false;
+  boost::optional<uint64_t> removedInode;
+
+  NameHash_t nameHash = util::HashFNV1a_32(fileName.data(), fileName.data() + fileName.size());
+  if (m_inode.levelsCount == 0)
+  {
+    removedInode = removeFromNode(
+      nameHash, fileName,
+      m_inode.directReferences.head,
+      m_inode.directReferences.dataSize,
+      inodeIsDirty);
+  }
+  else
+  {
+    removedInode = removeFromNode(
+      nameHash, fileName, m_inode.levelsCount,
+      m_inode.indirectReferences.children,
+      m_inode.indirectReferences.itemsCount,
+      inodeIsDirty);
+  }
+  if (inodeIsDirty)
+    util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
+
+  if (removedInode)
+    return std::make_pair(
+      BlockAddress::fromBlockIndex(*removedInode & ~format::DirectoryTreeLeafItem::DirectoryFlag),
+      (*removedInode & format::DirectoryTreeLeafItem::DirectoryFlag)
+        ? FileType::Directory
+        : FileType::Regular);
+  else
+    return {};
+}
+
 void Directory::remove(OnDeleteFileFunc_t const & onDeleteFile)
 {
   if (m_openMode == OpenMode::ReadOnly)
@@ -595,6 +733,12 @@ void Directory::removeNode(OnDeleteFileFunc_t const & onDeleteFile, format::Dire
   }
 }
 
+struct Directory::CheckState
+{
+  NameHash_t lastHash;
+  boost::optional<uint64_t> nextLeadNode;
+};
+
 void Directory::check() const
 {
   CheckState state;
@@ -604,12 +748,15 @@ void Directory::check() const
     checkNode(state, m_inode.directReferences.head, m_inode.directReferences.dataSize);
   else
     checkNode(state, m_inode.indirectReferences.children, m_inode.indirectReferences.itemsCount, m_inode.levelsCount);
+
+  F2F_FORMAT_ASSERT(!state.nextLeadNode 
+    || *state.nextLeadNode == format::DirectoryTreeLeaf::NoNextLeaf);
 }
 
 void Directory::checkNode(CheckState & checkState, format::DirectoryTreeChildNodeReference const * children, unsigned itemsCount, unsigned levelsRemain) const
 {
   F2F_FORMAT_ASSERT(itemsCount <= format::DirectoryTreeInternalNode::MaxCount);
-  for(int i=0; i<itemsCount; ++i)
+  for(unsigned i=0; i<itemsCount; ++i)
   {
     if (i > 0)
     {
@@ -622,6 +769,9 @@ void Directory::checkNode(CheckState & checkState, format::DirectoryTreeChildNod
       format::DirectoryTreeLeaf leaf;
       read(BlockAddress::fromBlockIndex(children[i].childBlockIndex), leaf);
       checkNode(checkState, leaf.head, leaf.dataSize);
+      if (checkState.nextLeadNode)
+        F2F_FORMAT_ASSERT(*checkState.nextLeadNode == children[i].childBlockIndex);
+      checkState.nextLeadNode = leaf.nextLeafNode;
     }
     else
     {
@@ -643,6 +793,79 @@ void Directory::checkNode(CheckState & checkState, format::DirectoryTreeLeafItem
     F2F_FORMAT_ASSERT(item->nameHash >= checkState.lastHash);
     checkState.lastHash = item->nameHash;
   }
+}
+
+struct Directory::Iterator::Iterator::Impl
+{
+  Impl(Directory const & directory)
+    : directory(directory)
+  {}
+
+  Directory const & directory;
+  format::DirectoryTreeLeaf currentLeaf;
+  std::unique_ptr<DirectoryTreeLeafItemConstIterator> iterator;
+};
+
+Directory::Iterator::Iterator(Directory const & directory)
+  : m_impl(new Impl(directory))
+{
+  if (directory.m_inode.levelsCount == 0)
+  {
+    m_impl->currentLeaf.nextLeafNode = format::DirectoryTreeLeaf::NoNextLeaf;
+    m_impl->currentLeaf.dataSize = directory.m_inode.directReferences.dataSize;
+    memcpy(&m_impl->currentLeaf.head, &directory.m_inode.directReferences.head, 
+      directory.m_inode.directReferences.dataSize);
+  }
+  else
+  {
+    BlockAddress blockIndex = BlockAddress::fromBlockIndex(
+      directory.m_inode.indirectReferences.children[0].childBlockIndex);
+    for(int level = 1; level < directory.m_inode.levelsCount; ++level)
+    {
+      format::DirectoryTreeInternalNode internalNode;
+      directory.read(blockIndex, internalNode);
+      blockIndex = BlockAddress::fromBlockIndex(internalNode.children[0].childBlockIndex);
+    }
+    directory.read(blockIndex, m_impl->currentLeaf);
+  }
+  m_impl->iterator.reset(new DirectoryTreeLeafItemConstIterator(m_impl->currentLeaf.head, m_impl->currentLeaf.dataSize));
+}
+
+Directory::Iterator::~Iterator()
+{}
+
+void Directory::Iterator::moveNext()
+{
+  ++*m_impl->iterator;
+  if (m_impl->iterator->atEnd())
+    if (m_impl->currentLeaf.nextLeafNode != format::DirectoryTreeLeaf::NoNextLeaf)
+    {
+      m_impl->directory.read(BlockAddress::fromBlockIndex(m_impl->currentLeaf.nextLeafNode), m_impl->currentLeaf);
+      m_impl->iterator.reset(new DirectoryTreeLeafItemConstIterator(m_impl->currentLeaf.head, m_impl->currentLeaf.dataSize));
+    }
+}
+
+bool Directory::Iterator::eof() const
+{
+  return m_impl->iterator->atEnd() && m_impl->currentLeaf.nextLeafNode == format::DirectoryTreeLeaf::NoNextLeaf;
+}
+
+BlockAddress Directory::Iterator::currentInode() const
+{
+  return BlockAddress::fromBlockIndex(
+    (*m_impl->iterator)->inode & ~format::DirectoryTreeLeafItem::DirectoryFlag);
+}
+
+FileType Directory::Iterator::currentFileType() const
+{
+  return ((*m_impl->iterator)->inode & format::DirectoryTreeLeafItem::DirectoryFlag)
+    ? FileType::Directory
+    : FileType::Regular;
+}
+
+utf8string_t Directory::Iterator::currentName() const
+{
+  return utf8string_t((*m_impl->iterator)->name, (*m_impl->iterator)->name + (*m_impl->iterator)->nameSize);
 }
 
 }

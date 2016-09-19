@@ -18,6 +18,8 @@ enum class OpenMode
   ReadWrite
 };
 
+const size_t MaxFileName = 950; // Max size of UTF-8 encoded file/directory name
+
 }
 
 #endif

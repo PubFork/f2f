@@ -113,4 +113,12 @@ void FileDescriptor::truncate()
   m_impl->ptr->file()->truncate();
 }
 
+uint64_t FileDescriptor::size() const
+{
+  if (!isOpen())
+    ThrowNotOpened();
+
+  return m_impl->ptr->file()->size();
+}
+
 }

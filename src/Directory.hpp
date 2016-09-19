@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <memory>
 #include "BlockStorage.hpp"
 #include "format/Directory.hpp"
 
@@ -18,18 +19,32 @@ public:
   Directory(BlockStorage &, BlockAddress const & inodeAddress, OpenMode openMode); // Open directory
 
   BlockAddress inodeAddress() const { return m_inodeAddress; }
+  BlockAddress parentInodeAddress() const;
 
   typedef std::function<void (BlockAddress, FileType)> OnDeleteFileFunc_t;
-  void remove(OnDeleteFileFunc_t const &);
+  void remove(OnDeleteFileFunc_t const &); // Delete this entire directory
   void addFile(BlockAddress inode, FileType, utf8string_t const & fileName);
   boost::optional<std::pair<BlockAddress, FileType>> searchFile(utf8string_t const & fileName) const;
-  boost::optional<std::pair<BlockAddress, FileType>> removeFile(utf8string_t const & fileName) const;
+  boost::optional<std::pair<BlockAddress, FileType>> removeFile(utf8string_t const & fileName);
 
-  void moveFirst();
-  void moveNext();
-  bool eof() const;
-  uint64_t currentFileInode() const;
-  utf8string_t currentFileName() const;
+  // Iterator doesn't return '..' record
+  class Iterator
+  {
+  public:
+    Iterator(Directory const &);
+    ~Iterator();
+
+    void moveNext();
+    bool eof() const;
+
+    BlockAddress currentInode() const;
+    FileType currentFileType() const;
+    utf8string_t currentName() const;
+
+  private:
+    struct Impl;
+    std::unique_ptr<Impl> m_impl;
+  };
 
   // Diagnostics
   void check() const;
@@ -58,16 +73,23 @@ private:
     uint16_t & itemsCount, unsigned maxItemsCount, bool & isDirty);
   std::vector<format::DirectoryTreeChildNodeReference> insertInNode(
     uint64_t inode, NameHash_t nameHash, utf8string_t const & fileName,
-    format::DirectoryTreeLeafItem & head, uint16_t & dataSize, unsigned maxSize, bool & isDirty);
+    format::DirectoryTreeLeafItem & head, uint64_t & nextLeafNode, 
+    uint16_t & dataSize, unsigned maxSize, bool & isDirty);
   static unsigned getSizeOfLeafRecord(utf8string_t const & fileName);
+
+  boost::optional<uint64_t> removeFromNode(NameHash_t nameHash, utf8string_t const & fileName, unsigned levelsRemain, BlockAddress blockIndex);
+  boost::optional<uint64_t> removeFromNode(
+    NameHash_t nameHash, utf8string_t const & fileName,
+    unsigned levelsRemain, format::DirectoryTreeChildNodeReference * children,
+    uint16_t & itemsCount, bool & isDirty);
+  boost::optional<uint64_t> removeFromNode(
+    NameHash_t nameHash, utf8string_t const & fileName,
+    format::DirectoryTreeLeafItem & head, uint16_t & dataSize, bool & isDirty);
 
   void removeNode(OnDeleteFileFunc_t const &, format::DirectoryTreeChildNodeReference const * children, unsigned itemsCount, unsigned levelsRemain);
   void removeNode(OnDeleteFileFunc_t const &, format::DirectoryTreeLeafItem const & head, unsigned dataSize);
 
-  struct CheckState
-  {
-    NameHash_t lastHash;
-  };
+  struct CheckState;
   void checkNode(CheckState &, format::DirectoryTreeChildNodeReference const * children, unsigned itemsCount, unsigned levelsRemain) const;
   void checkNode(CheckState &, format::DirectoryTreeLeafItem const & head, unsigned dataSize) const;
 };

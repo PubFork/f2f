@@ -6,6 +6,8 @@
 namespace f2f
 {
 
+static_assert(MaxFileName <= format::MaxFileNameSize, "");
+
 static const BlockAddress RootDirectoryAddress = BlockAddress::fromBlockIndex(0);
 
 FileSystem::FileSystem(std::unique_ptr<IStorage> && storage, bool format, OpenMode openMode)
@@ -89,11 +91,11 @@ void FileSystem::createDirectory(const char * pathStr)
 {
   fs::path path = fs::path(pathStr).relative_path();
 
-  if(path.empty())
+  if (path.empty())
     return; // Root directory already exists - ok
 
   boost::optional<std::pair<BlockAddress,FileType>> parentDirectory = m_impl->ptr->searchFile(path.parent_path());
-  if(!parentDirectory || parentDirectory->second != FileType::Directory)
+  if (!parentDirectory || parentDirectory->second != FileType::Directory)
     throw std::runtime_error("Can't find path to the directory");
 
   std::string fileName = path.filename().generic_string();
@@ -113,6 +115,56 @@ void FileSystem::createDirectory(const char * pathStr)
       return;
     else
       throw std::runtime_error("Can't create directory. File with same name already exists");
+  }
+}
+
+void FileSystem::remove(const char * pathStr)
+{
+  fs::path const path = fs::path(pathStr).relative_path();
+
+  // Check that all elements of path are valid
+  boost::optional<std::pair<BlockAddress, FileType>> target = m_impl->ptr->searchFile(path);
+  if (!target)
+    throw std::runtime_error("Can't find path to remove");
+
+  // Simplify path
+  std::vector<std::string> names;
+  for(auto pathElement: path)
+  {
+    if (pathElement.generic_string() == ".")
+      continue;
+    if (pathElement.generic_string() == "..")
+      if (!names.empty())
+        names.pop_back();
+  }
+
+  if (names.empty())
+    throw std::runtime_error("Can't remove root directory");
+  
+  BlockAddress currentDirectoryAddress = RootDirectoryAddress;
+  for (auto pathElementIt = names.begin(); pathElementIt != --names.end(); ++pathElementIt)
+  {
+    Directory directory(m_impl->ptr->m_blockStorage, currentDirectoryAddress, OpenMode::ReadOnly);
+    // TODO: file name encoding
+    boost::optional<std::pair<BlockAddress, FileType>> directoryItem =
+      directory.searchFile(*pathElementIt);
+
+    F2F_FORMAT_ASSERT(directoryItem && directoryItem->second == FileType::Directory);
+
+    currentDirectoryAddress = directoryItem->first;
+  }
+
+  Directory parentDirectory(m_impl->ptr->m_blockStorage, currentDirectoryAddress, OpenMode::ReadWrite);
+  boost::optional<std::pair<BlockAddress, FileType>> removedItem = parentDirectory.removeFile(names.back());
+  F2F_FORMAT_ASSERT(removedItem);
+  switch (removedItem->second)
+  {
+  case FileType::Regular:
+    m_impl->ptr->removeRegularFile(removedItem->first);
+    break;
+  case FileType::Directory:
+    m_impl->ptr->removeDirectory(removedItem->first);
+    break;
   }
 }
 
@@ -191,6 +243,39 @@ FileDescriptor FileSystemImpl::openFile(BlockAddress const & inodeAddress, OpenM
         }
       }
   ));
+}
+
+void FileSystemImpl::removeRegularFile(BlockAddress const & inodeAddress)
+{
+  auto openedFile = m_openedFiles.find(inodeAddress);
+  if (openedFile != m_openedFiles.end() && openedFile->second.refCount > 0)
+    openedFile->second.fileIsDeleted = true;
+  else
+  {
+    File file(m_blockStorage, inodeAddress, OpenMode::ReadWrite);
+    file.remove();
+  }
+}
+
+void FileSystemImpl::removeDirectory(BlockAddress const & inodeAddress)
+{
+  for(std::vector<BlockAddress> directories(1, inodeAddress); !directories.empty(); directories.pop_back())
+  {
+    Directory directory(m_blockStorage, directories.back(), OpenMode::ReadWrite);
+    directory.remove(
+      [this, &directories](BlockAddress address, FileType fileType)
+      {
+        switch(fileType)
+        {
+        case FileType::Regular:
+          removeRegularFile(address);
+          break;
+        case FileType::Directory:
+          directories.push_back(address);
+          break;
+        }
+      });
+  }
 }
 
 }

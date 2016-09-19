@@ -25,7 +25,11 @@ public:
 
   boost::optional<std::pair<BlockAddress, FileType>> searchFile(fs::path const & path);
 
-  FileDescriptor openFile(BlockAddress const & inodeAddress, OpenMode openMode, std::unique_ptr<File> && = std::unique_ptr<File>());
+  FileDescriptor openFile(BlockAddress const & inodeAddress, OpenMode openMode, 
+    std::unique_ptr<File> && = std::unique_ptr<File>());
+
+  void removeRegularFile(BlockAddress const & inodeAddress);
+  void removeDirectory(BlockAddress const & inodeAddress);
 
 private:
   struct DescriptorRecord
@@ -40,6 +44,14 @@ private:
     bool fileIsDeleted;
   };
   std::map<BlockAddress, DescriptorRecord> m_openedFiles; // key - inode block address
+
+  struct IteratedDirectory 
+  {
+    unsigned refCount;
+    unsigned directoryIsDeleted;
+  };
+
+  std::map<BlockAddress, IteratedDirectory> m_iteratedDirectories;
 };
 
 struct FileSystem::Impl

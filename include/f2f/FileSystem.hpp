@@ -26,12 +26,10 @@ public:
   FileDescriptor open(const char * path, OpenMode openMode, bool createIfRW = true);
 
   void createDirectory(const char * path);
-  void createDirectories(const char * path);
   void remove(const char * path);
 
   bool exists(const char * path) const;
   FileType fileType(const char * path) const;
-  uint64_t fileSize(const char * path) const;
 
 private:
   struct Impl;

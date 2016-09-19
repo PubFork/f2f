@@ -87,7 +87,8 @@ uint64_t BlockStorage::getBlocksCountByStorageSize(uint64_t size)
         && (size < format::OccupancyBlockSize
           || (size - format::OccupancyBlockSize) % format::AddressableBlockSize != 0))
         F2F_THROW_INVALID_FORMAT("Incorrect file size");
-      blocksCount += (size - format::OccupancyBlockSize) / format::AddressableBlockSize;
+      if (size > 0)
+        blocksCount += (size - format::OccupancyBlockSize) / format::AddressableBlockSize;
     }
     else
       if (size > OccupancyGroupLevels.levelAbsoluteSize[level - 1])

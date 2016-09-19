@@ -22,6 +22,7 @@ public:
   void read(size_t & inOutSize, void * buffer);
   void write(size_t size, void const * buffer);
   void truncate();
+  uint64_t size() const;
 
   // Diagnostics
   void check() const;

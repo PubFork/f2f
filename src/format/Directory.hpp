@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include "Common.hpp"
 #include "Inode.hpp"
 
@@ -24,6 +25,7 @@ struct DirectoryTreeLeafHeader
 {
   // dataSize and MaxDataSize are sizes of sequence of DirectoryTreeLeafItem items (header with following string)
   static const unsigned MaxDataSize = AddressableBlockSize - 2 /*dataSize*/ - 8 /*nextLeafNode*/;
+  static const uint64_t NoNextLeaf = std::numeric_limits<uint64_t>::max();
 
   uint16_t dataSize;
   uint64_t nextLeafNode;
@@ -54,8 +56,9 @@ static const unsigned MaxFileNameSize = DirectoryTreeLeafHeader::MaxDataSize - o
 
 struct DirectoryInode : InodeHeader
 {
+  uint64_t parentDirectoryInode;
   uint16_t levelsCount;
-  static const unsigned PayloadSize = AddressableBlockSize - sizeof(InodeHeader) - 2;
+  static const unsigned PayloadSize = AddressableBlockSize - sizeof(InodeHeader) - 2 - 8;
 
   struct IndirectReferences
   {

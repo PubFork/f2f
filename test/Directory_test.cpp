@@ -47,6 +47,11 @@ TEST(Directory, T1)
     std::unique_ptr<f2f::BlockStorage> blockStorage(new f2f::BlockStorage(storage, true));
     std::unique_ptr<f2f::Directory> directory(new f2f::Directory(*blockStorage, f2f::Directory::NoParentDirectory));
   
+    {
+      f2f::Directory::Iterator it(*directory);
+      EXPECT_TRUE(it.eof());
+    }
+
     std::uniform_int_distribution<> collision_dist(0, 100'000);
     std::map<std::string, uint64_t> items;
 
@@ -73,7 +78,7 @@ TEST(Directory, T1)
       if (ins.second)
         directory->addFile(f2f::BlockAddress::fromBlockIndex(i), f2f::FileType::Regular, name);
 
-      if (i%1000 == 999)
+      if (i%10000 == 9999)
         directory->check();
 
       if (collision_dist(random_engine) < 100)
@@ -85,6 +90,18 @@ TEST(Directory, T1)
           blockStorage.reset(new f2f::BlockStorage(storage));
 
         directory.reset(new f2f::Directory(*blockStorage, inodeIndex, f2f::OpenMode::ReadWrite));
+      }
+
+      if (collision_dist(random_engine) == 1)
+      {
+        std::cout << "Checking directory contents" << std::endl;
+        std::map<std::string, uint64_t> listed_items;
+        for(f2f::Directory::Iterator it(*directory); !it.eof(); it.moveNext())
+        {
+          EXPECT_EQ(f2f::FileType::Regular, it.currentFileType());
+          EXPECT_TRUE(listed_items.insert(std::make_pair(it.currentName(), it.currentInode().index())).second);
+        }
+        EXPECT_TRUE(items == listed_items);
       }
     }
 

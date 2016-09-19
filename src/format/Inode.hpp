@@ -11,12 +11,10 @@ namespace f2f { namespace format
 
 struct InodeHeader
 {
-  static const uint16_t FlagDirty = 0x200; // Runtime-only flag
-
   uint16_t flags;
   uint64_t fileSize;
   uint64_t blocksCount;
-  uint64_t creationTime;
+  char reservedForMetadata[32];
 };
 
 struct FileInode: InodeHeader
