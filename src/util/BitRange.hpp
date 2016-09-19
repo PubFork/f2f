@@ -64,19 +64,52 @@ void SetBitRange(BitmapWord * bits, unsigned beginPosition, unsigned endPosition
 }
 
 template<class BitmapWord>
+void SetBit(BitmapWord * bits, unsigned position)
+{
+  static_assert(std::is_unsigned<BitmapWord>::value, "");
+
+  bits[position / (sizeof(BitmapWord) * 8)] |= BitmapWord(1) << (position % (sizeof(BitmapWord) * 8));
+}
+
+template<class BitmapWord>
 int FindAndSetFirstZeroBit(BitmapWord * bits, unsigned startWord, unsigned wordCount, int & nextWordWithZeroBit)
 {
   static_assert(std::is_unsigned<BitmapWord>::value, "");
 
   nextWordWithZeroBit = -1;
-  for (unsigned i = startWord; i < wordCount; ++i)
+  for(unsigned i = startWord; i < wordCount; ++i)
   {
     if (bits[i] != std::numeric_limits<BitmapWord>::max())
     {
       unsigned const firstZeroBit = boost::multiprecision::lsb(~bits[i]);
       unsigned const index = i * sizeof(BitmapWord) * 8 + firstZeroBit;
       bits[i] |= BitmapWord(1) << firstZeroBit;
-      for (; i < wordCount; ++i)
+      for(; i < wordCount; ++i)
+        if (bits[i] != std::numeric_limits<BitmapWord>::max())
+        {
+          nextWordWithZeroBit = i;
+          break;
+        }
+
+      return index;
+    }
+  }
+  return -1;
+}
+
+template<class BitmapWord>
+int FindFirstZeroBit(BitmapWord * bits, unsigned startWord, unsigned wordCount, int & nextWordWithZeroBit)
+{
+  static_assert(std::is_unsigned<BitmapWord>::value, "");
+
+  nextWordWithZeroBit = -1;
+  for(unsigned i = startWord; i < wordCount; ++i)
+  {
+    if (bits[i] != std::numeric_limits<BitmapWord>::max())
+    {
+      unsigned const firstZeroBit = boost::multiprecision::lsb(~bits[i]);
+      unsigned const index = i * sizeof(BitmapWord) * 8 + firstZeroBit;
+      for(; i < wordCount; ++i)
         if (bits[i] != std::numeric_limits<BitmapWord>::max())
         {
           nextWordWithZeroBit = i;
@@ -121,6 +154,18 @@ template<class BitmapWord>
 bool GetBitInRange(BitmapWord const * bits, unsigned position)
 {
   return (bits[position / (sizeof(BitmapWord) * 8)] >> (position % (sizeof(BitmapWord) * 8))) & 1;
+}
+
+template<class BitmapWord>
+bool HasZeroBit(BitmapWord const * bits, unsigned wordCount)
+{
+  static_assert(std::is_unsigned<BitmapWord>::value, "");
+
+  for (unsigned i = 0; i < wordCount; ++i)
+    if (bits[i] != std::numeric_limits<BitmapWord>::max())
+      return true;
+
+  return false;
 }
 
 }}

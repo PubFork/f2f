@@ -6,27 +6,54 @@
 #include "format/Common.hpp"
 #include "Exception.hpp"
 
-/*
-
-TODO:
-- Optimize free group search
-
-*/
-
 namespace f2f
 {
 
+namespace
+{
+
+struct OccupancyGroupLevelsInit
+{
+  static const unsigned LevelsCount = 4;
+  OccupancyGroupLevelsInit()
+  {
+    levelAbsoluteSize[0] =
+      format::OccupancyBlockSize + format::OccupancyBlock::BitmapItemsCount * format::AddressableBlockSize;
+    blocksInLevel[0] = format::OccupancyBlock::BitmapItemsCount;
+    for (int level = 1; level < LevelsCount; ++level)
+    {
+      levelAbsoluteSize[level] =
+        levelAbsoluteSize[level - 1] * format::OccupancyBlock::BitmapItemsCount
+        + format::OccupancyBlockSize;
+      blocksInLevel[level] = blocksInLevel[level - 1] * format::OccupancyBlock::BitmapItemsCount;
+    }
+  }
+
+  uint64_t levelAbsoluteSize[LevelsCount];
+  uint64_t blocksInLevel[LevelsCount];
+};
+
+const OccupancyGroupLevelsInit OccupancyGroupLevels;
+
+}
+
 uint64_t BlockAddress::absoluteAddress() const
 {
-  return 
-    (m_blockIndex / format::OccupancyBlock::BitmapItemsCount + 1) * format::OccupancyBlockSize
+  uint64_t occupancyBlocks = m_blockIndex / format::OccupancyBlock::BitmapItemsCount + 1;
+  for(int level = 1; level < OccupancyGroupLevels.LevelsCount; ++level)
+  {
+    occupancyBlocks += 
+      (m_blockIndex + (OccupancyGroupLevels.blocksInLevel[level] - OccupancyGroupLevels.blocksInLevel[level - 1])) 
+      / OccupancyGroupLevels.blocksInLevel[level];
+  }
+  return occupancyBlocks * format::OccupancyBlockSize
     + m_blockIndex * format::AddressableBlockSize;
 }
 
 uint64_t BlockStorage::getOccupancyBlockPosition(uint64_t groupIndex)
 {
-  return groupIndex * (format::OccupancyBlockSize 
-    + format::OccupancyBlock::BitmapItemsCount * format::AddressableBlockSize);
+  return BlockAddress::fromBlockIndex(groupIndex * format::OccupancyBlock::BitmapItemsCount).absoluteAddress() 
+    - format::OccupancyBlockSize;
 }
 
 uint64_t BlockStorage::getBlockGroupIndex(uint64_t blockIndex)
@@ -46,11 +73,27 @@ uint64_t BlockStorage::getSizeForNBlocks(uint64_t numBlocks)
   return BlockAddress::fromBlockIndex(numBlocks - 1).absoluteAddress() + format::AddressableBlockSize;
 }
 
-uint64_t BlockStorage::groupsCount() const 
-{ 
-  if (m_blocksCount == 0)
-    return 0;
-  return getBlockGroupIndex(m_blocksCount - 1) + 1; 
+uint64_t BlockStorage::getBlocksCountByStorageSize(uint64_t size)
+{
+  uint64_t blocksCount = 0;
+  for(int level = OccupancyGroupLevels.LevelsCount - 1; level >= 0; --level)
+  {
+    uint64_t groupsCount = size / OccupancyGroupLevels.levelAbsoluteSize[level];
+    size %= OccupancyGroupLevels.levelAbsoluteSize[level];
+    blocksCount += groupsCount * OccupancyGroupLevels.blocksInLevel[level];
+    if (level == 0)
+    {
+      if (size > 0
+        && (size < format::OccupancyBlockSize
+          || (size - format::OccupancyBlockSize) % format::AddressableBlockSize != 0))
+        F2F_THROW_INVALID_FORMAT("Incorrect file size");
+      blocksCount += (size - format::OccupancyBlockSize) / format::AddressableBlockSize;
+    }
+    else
+      if (size > OccupancyGroupLevels.levelAbsoluteSize[level - 1])
+        size -= format::OccupancyBlockSize;
+  }
+  return blocksCount;
 }
 
 BlockStorage::BlockStorage(IStorage & storage, bool format)
@@ -63,18 +106,7 @@ BlockStorage::BlockStorage(IStorage & storage, bool format)
   }
   else
   {
-    static unsigned const WholeGroupSize = format::OccupancyBlockSize
-      + format::OccupancyBlock::BitmapItemsCount * format::AddressableBlockSize;
-    uint64_t lastOccupancyGroupSize = storage.size() % WholeGroupSize;
-    if (storage.size() != 0
-        && lastOccupancyGroupSize > 0
-        && ( lastOccupancyGroupSize < format::OccupancyBlockSize
-          || (lastOccupancyGroupSize - format::OccupancyBlockSize) % format::AddressableBlockSize != 0))
-      F2F_THROW_INVALID_FORMAT("Incorrect file size");
-
-    m_blocksCount = storage.size() / WholeGroupSize * format::OccupancyBlock::BitmapItemsCount;
-    if (lastOccupancyGroupSize != 0)
-      m_blocksCount += (lastOccupancyGroupSize - format::OccupancyBlockSize) / format::AddressableBlockSize;
+    m_blocksCount = getBlocksCountByStorageSize(storage.size());
   }
 }
 
@@ -85,52 +117,162 @@ BlockAddress BlockStorage::allocateBlock()
   return newBlock;
 }
 
-void BlockStorage::allocateBlocks(uint64_t numBlocks, std::function<void (BlockAddress const &)> const & visitor/*, locationHints*/)
+void BlockStorage::allocateBlocks(uint64_t numBlocks, std::function<void(BlockAddress const &)> const & visitor)
 {
-  for(uint64_t groupIndex = 0, groupsN = groupsCount(); 
-    numBlocks > 0 && groupIndex < groupsN; ++groupIndex)
-  {
-    bool blockIsDirty = false;
-    format::OccupancyBlock block;
-    util::readT(m_storage, getOccupancyBlockPosition(groupIndex), block);
-    
-    for(int nextBitmapWord = 0; numBlocks > 0 && nextBitmapWord != -1;)
-    {
-      int occupiedBlockInGroup = 
-        util::FindAndSetFirstZeroBit(
-          block.bitmap, nextBitmapWord, format::OccupancyBlock::BitmapWordsCount, nextBitmapWord);
-      if (occupiedBlockInGroup == -1)
-        break;
-
-      blockIsDirty = true;
-
-      uint64_t occupiedBlock = groupIndex * format::OccupancyBlock::BitmapItemsCount + occupiedBlockInGroup;
-
-      // How it can be that unallocated block 'm_blocksCount' marked as occupied?
-      F2F_FORMAT_ASSERT(occupiedBlock <= m_blocksCount);
-
-      if (occupiedBlock == m_blocksCount)
-        // We're in the last group, need to append blocks
-        break;
-
-      visitor(BlockAddress::fromBlockIndex(occupiedBlock));
-      --numBlocks;
-    }
-    if (blockIsDirty)
-      util::writeT(m_storage, getOccupancyBlockPosition(groupIndex), block);
-  }
-  if (numBlocks > 0)
-    appendBlocks(numBlocks, visitor);
+  allocateBlocks(numBlocks, visitor, OccupancyGroupLevels.LevelsCount - 1, 0, 0);
 }
 
-void BlockStorage::appendBlocks(uint64_t numBlocks, std::function<void(BlockAddress const &)> const & visitor)
+// Returns true if group still has free blocks
+bool BlockStorage::allocateBlocks(uint64_t & numBlocks, 
+  std::function<void(BlockAddress const &)> const & visitor,
+  unsigned level, uint64_t absoluteOffset, uint64_t blocksOffset)
 {
-  uint64_t originalBlocksCount = m_blocksCount;
-  m_blocksCount += numBlocks;
-  m_storage.resize(getSizeForNBlocks(m_blocksCount));
-  markBlocks(originalBlocksCount, numBlocks, Status::occupied);
-  for(uint64_t blockIndex = originalBlocksCount; blockIndex < m_blocksCount; ++blockIndex)
-    visitor(BlockAddress::fromBlockIndex(blockIndex));
+  if (level == 0)
+  {
+    return allocateBlocksLevel0(numBlocks, visitor, absoluteOffset, blocksOffset);
+  }
+  else
+  {
+    uint64_t position = absoluteOffset + OccupancyGroupLevels.levelAbsoluteSize[level - 1];
+    bool blockIsDirty = false;
+    format::OccupancyBlock block;
+    if (position >= m_storage.size())
+    {
+      // Occupancy block of this level isn't created yet, but it may be created
+      // during processing the loop
+      memset(&block, 0, sizeof(block));
+    }
+    else
+    {
+      util::readT(m_storage, position, block);
+    }
+    int nextBitmapWord = 0;
+    for (; numBlocks > 0 && nextBitmapWord != -1;)
+    {
+      int freeGroup = util::FindFirstZeroBit(
+        block.bitmap, nextBitmapWord, format::OccupancyBlock::BitmapWordsCount, nextBitmapWord);
+      if (freeGroup == -1)
+        break;
+      if (!allocateBlocks(numBlocks, visitor, level - 1, 
+        freeGroup == 0 
+          ? absoluteOffset 
+          : (absoluteOffset + format::OccupancyBlockSize + freeGroup * OccupancyGroupLevels.levelAbsoluteSize[level - 1]),
+        blocksOffset + freeGroup * OccupancyGroupLevels.blocksInLevel[level - 1]))
+      {
+        blockIsDirty = true;
+        util::SetBit(block.bitmap, freeGroup);
+      }
+    }
+    if (blockIsDirty)
+      if (position < m_storage.size())
+        util::writeT(m_storage, position, block);
+    return nextBitmapWord != -1;
+  }
+}
+
+// Returns true if group still has free blocks
+bool BlockStorage::allocateBlocksLevel0(uint64_t & numBlocks, 
+  std::function<void(BlockAddress const &)> const & visitor,
+  uint64_t absoluteOffset, uint64_t blocksOffset)
+{
+  bool blockIsDirty = false;
+  format::OccupancyBlock block;
+  if (absoluteOffset >= m_storage.size())
+  {
+    // Occupancy block of this level isn't created yet, but it may be created
+    // during processing the loop
+    memset(&block, 0, sizeof(block));
+  }
+  else
+    util::readT(m_storage, absoluteOffset, block);
+
+  int nextBitmapWord = 0;
+  for (; numBlocks > 0 && nextBitmapWord != -1;)
+  {
+    int occupiedBlockInGroup =
+      util::FindAndSetFirstZeroBit(
+        block.bitmap, nextBitmapWord, format::OccupancyBlock::BitmapWordsCount, nextBitmapWord);
+    if (occupiedBlockInGroup == -1)
+      break;
+
+    blockIsDirty = true;
+
+    uint64_t occupiedBlock = blocksOffset + occupiedBlockInGroup;
+
+    // How it can be that unallocated block 'm_blocksCount' marked as occupied?
+    F2F_FORMAT_ASSERT(occupiedBlock <= m_blocksCount);
+
+    if (occupiedBlock == m_blocksCount)
+    {
+      // We're in the last group, need to append blocks
+      m_storage.resize(getSizeForNBlocks(m_blocksCount + numBlocks));
+      m_blocksCount += numBlocks;
+    }
+
+    visitor(BlockAddress::fromBlockIndex(occupiedBlock));
+    --numBlocks;
+  }
+  if (blockIsDirty)
+    util::writeT(m_storage, absoluteOffset, block);
+
+  return nextBitmapWord != -1;
+}
+
+// Returns true if group was fully occupied 
+bool BlockStorage::markBlocksAsFree(uint64_t beginBlockInGroup, uint64_t endBlockInGroup,
+  unsigned level, uint64_t absoluteOffset, uint64_t blocksOffset)
+{
+  if (level == 0)
+  {
+    assert(beginBlockInGroup <= endBlockInGroup);
+    assert(endBlockInGroup < format::OccupancyBlock::BitmapItemsCount);
+    if (absoluteOffset < m_storage.size())
+    {
+      format::OccupancyBlock block;
+      util::readT(m_storage, absoluteOffset, block);
+      bool hadFreeBlocks = util::HasZeroBit(block.bitmap, format::OccupancyBlock::BitmapWordsCount);
+      util::ClearBitRange(block.bitmap, beginBlockInGroup, endBlockInGroup);
+      util::writeT(m_storage, absoluteOffset, block);
+      return !hadFreeBlocks;
+    }
+    else
+      return false; // return value "didn't have free blocks" isn't completely true, but it should work
+  }
+  else
+  {
+    bool blockIsDirty = false;
+    uint64_t beginSubGroup = beginBlockInGroup / OccupancyGroupLevels.blocksInLevel[level - 1];
+    uint64_t endSubGroup = endBlockInGroup / OccupancyGroupLevels.blocksInLevel[level - 1];
+    assert(beginSubGroup <= endSubGroup);
+    assert(endSubGroup < format::OccupancyBlock::BitmapItemsCount);
+    for(uint64_t subGroup = beginSubGroup; subGroup <= endSubGroup; ++subGroup)
+    {
+      uint64_t beginBlockInSubGroup = 0;
+      uint64_t endBlockInSubGroup = OccupancyGroupLevels.blocksInLevel[level - 1] - 1;
+      if (subGroup == beginSubGroup)
+        beginBlockInSubGroup = beginBlockInGroup % OccupancyGroupLevels.blocksInLevel[level - 1];
+      if (subGroup == endSubGroup)
+        endBlockInSubGroup = endBlockInGroup % OccupancyGroupLevels.blocksInLevel[level - 1];
+      if (markBlocksAsFree(beginBlockInSubGroup, endBlockInSubGroup, level - 1,
+          subGroup == 0
+            ? absoluteOffset
+            : (absoluteOffset + format::OccupancyBlockSize + subGroup * OccupancyGroupLevels.levelAbsoluteSize[level - 1]),
+          blocksOffset + subGroup * OccupancyGroupLevels.blocksInLevel[level - 1]))
+        blockIsDirty = true;
+    }
+
+    bool hadFreeBlocks = true;
+    uint64_t position = absoluteOffset + OccupancyGroupLevels.levelAbsoluteSize[level - 1];
+    if (position < m_storage.size())
+    {
+      format::OccupancyBlock block;
+      util::readT(m_storage, position, block);
+      bool hadFreeBlocks = util::HasZeroBit(block.bitmap, format::OccupancyBlock::BitmapWordsCount);
+      util::ClearBitRange(block.bitmap, beginSubGroup, endSubGroup);
+      util::writeT(m_storage, position, block);
+    }
+    return !hadFreeBlocks;
+  }
 }
 
 void BlockStorage::releaseBlocks(BlockAddress blockAddress, unsigned numBlocks)
@@ -140,29 +282,26 @@ void BlockStorage::releaseBlocks(BlockAddress blockAddress, unsigned numBlocks)
   if (blockIndex + numBlocks > m_blocksCount)
     throw std::runtime_error("Expectation fault: Invalid argument");
 
+  uint64_t endBlockIndex;
   if (blockIndex + numBlocks == m_blocksCount)
   {
     // Truncate as much as possible including all free blocks at the end
     blockIndex = findStartOfFreeBlocksRange(blockIndex);
+    endBlockIndex = m_blocksCount - 1;
     truncateStorage(blockIndex);
-
-    unsigned blockInGroup = getBlockIndexInGroup(blockIndex);
-    if (blockInGroup != 0)
-    {
-      // If not whole group truncated
-      uint64_t beginGroupIndex = getBlockGroupIndex(blockIndex);
-      markBlocksInGroup(beginGroupIndex, blockInGroup, format::OccupancyBlock::BitmapItemsCount - 1, Status::free);
-    }
   }
   else
-    markBlocks(blockIndex, numBlocks, Status::free);
+    endBlockIndex = blockIndex + numBlocks - 1;
+
+  markBlocksAsFree(blockIndex, endBlockIndex, OccupancyGroupLevels.LevelsCount - 1, 0, 0);
 }
 
 bool BlockStorage::isAdjacentBlocks(BlockAddress blockRangeStart, unsigned rangeSize, BlockAddress blockIndex2)
 {
   auto lastBlockInRange = blockRangeStart.index() + rangeSize - 1;
   return lastBlockInRange + 1 == blockIndex2.index()
-    && getBlockGroupIndex(lastBlockInRange) == getBlockGroupIndex(blockIndex2.index());
+    && BlockAddress::fromBlockIndex(lastBlockInRange).absoluteAddress() 
+      + format::AddressableBlockSize == blockIndex2.absoluteAddress();
 }
 
 int64_t BlockStorage::findStartOfFreeBlocksRange(uint64_t endBlockIndex) const
@@ -187,33 +326,6 @@ int64_t BlockStorage::findStartOfFreeBlocksRange(uint64_t endBlockIndex) const
       break;
   }
   return 0;
-}
-
-void BlockStorage::markBlocks(uint64_t blockIndex, uint64_t numBlocks, Status status)
-{
-  uint64_t beginGroupIndex = getBlockGroupIndex(blockIndex);
-  uint64_t endGroupIndex = getBlockGroupIndex(blockIndex + numBlocks - 1);
-  for(uint64_t groupIndex = beginGroupIndex; groupIndex <= endGroupIndex; ++groupIndex)
-  {
-    unsigned beginBlock = 0;
-    if (groupIndex == beginGroupIndex)
-      beginBlock = getBlockIndexInGroup(blockIndex);
-    unsigned endBlock = format::OccupancyBlock::BitmapItemsCount - 1;
-    if (groupIndex == endGroupIndex)
-      endBlock = getBlockIndexInGroup(blockIndex + numBlocks - 1);
-    markBlocksInGroup(groupIndex, beginBlock, endBlock, status);
-  }
-}
-
-void BlockStorage::markBlocksInGroup(uint64_t groupIndex, unsigned beginBlock, unsigned endBlock, Status status)
-{
-  format::OccupancyBlock block;
-  util::readT(m_storage, getOccupancyBlockPosition(groupIndex), block);
-  if (status == Status::free)
-    util::ClearBitRange(block.bitmap, beginBlock, endBlock);
-  else
-    util::SetBitRange(block.bitmap, beginBlock, endBlock);
-  util::writeT(m_storage, getOccupancyBlockPosition(groupIndex), block);
 }
 
 void BlockStorage::truncateStorage(uint64_t numBlocks)

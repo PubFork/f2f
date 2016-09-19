@@ -58,20 +58,24 @@ private:
   IStorage & m_storage;
   uint64_t m_blocksCount;
 
-  uint64_t groupsCount() const;
+  bool allocateBlocksLevel0(uint64_t & numBlocks,
+    std::function<void(BlockAddress const &)> const & visitor,
+    uint64_t absoluteOffset, uint64_t blocksOffset);
+  bool allocateBlocks(uint64_t & numBlocks, 
+    std::function<void(BlockAddress const &)> const & visitor,
+    unsigned level, uint64_t absoluteOffset, uint64_t blocksOffset);
 
-  void appendBlocks(uint64_t numBlocks, std::function<void(BlockAddress const &)> const & visitor);
   void truncateStorage(uint64_t numBlocks);
 
-  enum class Status { occupied, free };
-  void markBlocks(uint64_t blockIndex, uint64_t numBlocks, Status status);
-  void markBlocksInGroup(uint64_t groupIndex, unsigned beginBlock, unsigned endBlock, Status status);
+  bool markBlocksAsFree(uint64_t beginBlockInGroup, uint64_t endBlockInGroup,
+    unsigned level, uint64_t absoluteOffset, uint64_t blocksOffset);
   int64_t findStartOfFreeBlocksRange(uint64_t blockIndex) const;
 
   static uint64_t getOccupancyBlockPosition(uint64_t groupIndex);
   static uint64_t getBlockGroupIndex(uint64_t blockIndex);
   static unsigned getBlockIndexInGroup(uint64_t blockIndex);
   static uint64_t getSizeForNBlocks(uint64_t numBlocks);
+  static uint64_t getBlocksCountByStorageSize(uint64_t size);
 };
 
 }

@@ -41,17 +41,19 @@ void FileBlocks::moveToNextRange()
   if (m_position->indexInBlock < m_position->block.itemsCount)
     ++m_position->indexInBlock;
 
-  if (m_position->indexInBlock == m_position->block.itemsCount)
-    if (m_position->block.nextLeafNode != format::BlockRangesLeafNode::NoNextLeaf)
+  if (m_position->indexInBlock == m_position->block.itemsCount
+    && m_position->block.nextLeafNode != format::BlockRangesLeafNode::NoNextLeaf)
     {
       format::BlockRangesLeafNode leaf;
       util::readT(m_storage, BlockAddress::fromBlockIndex(m_position->block.nextLeafNode), leaf);
       m_position->block = leaf;
       m_position->indexInBlock = 0;
-      m_position->range = OffsetAndSize(
-        BlockAddress::fromBlockIndex(leaf.ranges[0].blockIndex()), 
-        leaf.ranges[0].blocksCount);
     }
+
+  if (!eof())
+    m_position->range = OffsetAndSize(
+      BlockAddress::fromBlockIndex(m_position->block.ranges[m_position->indexInBlock].blockIndex()),
+      m_position->block.ranges[m_position->indexInBlock].blocksCount);
 }
 
 bool FileBlocks::eof() const
@@ -217,9 +219,10 @@ void FileBlocks::appendRootT(uint64_t numBlocks, typename Traits::NodeType & nod
     inode_container.itemsCount,
     getItems(node_container));
 
+  bool rootBlockCopyIsDirty = false;
   std::vector<format::ChildNodeReference> childrenToAdd =
-    appendToTreeNode(m_inode.levelsCount, numBlocks, node_container, m_treeRootBlockIsDirty);
-  if (node_container.itemsCount != inode_container.itemsCount)
+    appendToTreeNode(m_inode.levelsCount, numBlocks, node_container, rootBlockCopyIsDirty);
+  if (rootBlockCopyIsDirty)
   {
     if (node_container.itemsCount > inode_container.MaxCount)
     {
@@ -234,14 +237,16 @@ void FileBlocks::appendRootT(uint64_t numBlocks, typename Traits::NodeType & nod
     }
     else
     {
+      m_treeRootBlockIsDirty = true;
+
       // We shouldn't need another level if inode isn't filled up yet
       assert(childrenToAdd.empty());
 
-      // Append added values back to inode
+      // Copy changed/added values back to inode. Last direct range may be extended with new adjacent blocks
       std::copy_n(
-        getItems(node_container) + inode_container.itemsCount,
-        node_container.itemsCount - inode_container.itemsCount,
-        getItems(inode_container) + inode_container.itemsCount
+        getItems(node_container),
+        node_container.itemsCount,
+        getItems(inode_container)
       );
       inode_container.itemsCount = node_container.itemsCount;
     }
