@@ -1,9 +1,6 @@
 #include "StorageInMemory.hpp"
 
-namespace f2f
-{
-
-StorageInMemory::StorageInMemory(OpenMode mode)
+StorageInMemory::StorageInMemory(f2f::OpenMode mode)
   : m_mode(mode)
 {
 }
@@ -17,7 +14,7 @@ void StorageInMemory::read(uint64_t position, size_t size, void * data) const
 
 void StorageInMemory::write(uint64_t position, size_t size, void const * data)
 {
-  if (m_mode != OpenMode::ReadWrite)
+  if (m_mode != f2f::OpenMode::ReadWrite)
     throw std::runtime_error("Incorrect file mode");
   if (position + size > m_data.size())
     throw std::runtime_error("Unexpected");
@@ -26,11 +23,9 @@ void StorageInMemory::write(uint64_t position, size_t size, void const * data)
 
 void StorageInMemory::resize(uint64_t size)
 {
-  if (m_mode != OpenMode::ReadWrite)
+  if (m_mode != f2f::OpenMode::ReadWrite)
     throw std::runtime_error("Incorrect file mode");
   if (size > std::numeric_limits<size_t>::max())
     throw std::runtime_error("Unexpected");
   m_data.resize(static_cast<size_t>(size));
-}
-
 }

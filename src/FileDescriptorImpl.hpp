@@ -15,7 +15,7 @@ class FileDescriptorImpl
 public:
   typedef std::function<void()> OnCloseFunc_t;
 
-  FileDescriptorImpl(std::unique_ptr<File> && file, std::shared_ptr<FileSystemImpl>  const & owner, OnCloseFunc_t const & onClose)
+  FileDescriptorImpl(std::unique_ptr<File> && file, std::shared_ptr<FileSystemImpl> const & owner, OnCloseFunc_t const & onClose)
     : m_file(std::move(file))
     , m_owner(owner)
     , m_onClose(onClose)

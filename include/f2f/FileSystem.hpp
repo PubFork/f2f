@@ -5,6 +5,7 @@
 #include <memory>
 #include "f2f/Common.hpp"
 #include "f2f/Defs.hpp"
+#include "f2f/DirectoryIterator.hpp"
 #include "f2f/FileDescriptor.hpp"
 
 namespace f2f
@@ -24,12 +25,17 @@ public:
   OpenMode openMode() const;
 
   FileDescriptor open(const char * path, OpenMode openMode, bool createIfRW = true);
+  FileDescriptor open(const char * path) const; // Open file in read-only mode
 
   void createDirectory(const char * path);
   void remove(const char * path);
 
   bool exists(const char * path) const;
   FileType fileType(const char * path) const;
+
+  DirectoryIterator directoryIterator(const char * path) const;
+
+  void check();
 
 private:
   struct Impl;

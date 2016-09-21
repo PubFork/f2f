@@ -23,6 +23,8 @@ public:
   BlockStorage m_blockStorage;
   OpenMode const m_openMode;
 
+  void requiresReadWriteMode();
+
   boost::optional<std::pair<BlockAddress, FileType>> searchFile(fs::path const & path);
 
   FileDescriptor openFile(BlockAddress const & inodeAddress, OpenMode openMode, 
@@ -30,6 +32,19 @@ public:
 
   void removeRegularFile(BlockAddress const & inodeAddress);
   void removeDirectory(BlockAddress const & inodeAddress);
+
+  struct IteratedDirectory
+  {
+    IteratedDirectory()
+      : refCount(0)
+      ,directoryIsDeleted(false)
+    {}
+
+    unsigned refCount;
+    bool directoryIsDeleted;
+  };
+
+  std::map<BlockAddress,IteratedDirectory> m_iteratedDirectories;
 
 private:
   struct DescriptorRecord
@@ -43,15 +58,8 @@ private:
     unsigned refCount;
     bool fileIsDeleted;
   };
+
   std::map<BlockAddress, DescriptorRecord> m_openedFiles; // key - inode block address
-
-  struct IteratedDirectory 
-  {
-    unsigned refCount;
-    unsigned directoryIsDeleted;
-  };
-
-  std::map<BlockAddress, IteratedDirectory> m_iteratedDirectories;
 };
 
 struct FileSystem::Impl

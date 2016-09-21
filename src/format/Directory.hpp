@@ -13,7 +13,7 @@ namespace f2f { namespace format
 struct DirectoryTreeLeafItem
 {
   // DirectoryFlag is set in inode value for directories
-  static const uint64_t DirectoryFlag = 1ui64 << 63;
+  static const uint64_t DirectoryFlag = UINT64_C(1) << 63;
 
   uint64_t inode;
   uint32_t nameHash;

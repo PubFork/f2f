@@ -14,9 +14,10 @@ class Directory
 {
 public:
   static const BlockAddress NoParentDirectory;
+  struct create_tag {};
 
-  Directory(BlockStorage &, BlockAddress const & parentAddress); // Create directory
-  Directory(BlockStorage &, BlockAddress const & inodeAddress, OpenMode openMode); // Open directory
+  Directory(BlockStorage &, BlockAddress const & parentAddress, create_tag); // Create directory
+  Directory(BlockStorage &, BlockAddress const & inodeAddress); // Open directory
 
   BlockAddress inodeAddress() const { return m_inodeAddress; }
   BlockAddress parentInodeAddress() const;
@@ -52,11 +53,8 @@ public:
 private:
   BlockStorage & m_blockStorage;
   IStorage & m_storage;
-  OpenMode const m_openMode;
   BlockAddress m_inodeAddress;
   format::DirectoryInode m_inode;
-
-  void checkOpenMode();
 
   void read(BlockAddress blockIndex, format::DirectoryTreeInternalNode & internalNode) const;
   void read(BlockAddress blockIndex, format::DirectoryTreeLeaf & leaf) const;

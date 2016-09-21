@@ -2,7 +2,8 @@
 
 #include <boost/optional.hpp>
 #include "f2f/IStorage.hpp"
-#include "Format/BlockStorage.hpp"
+#include "format/BlockStorage.hpp"
+#include "format/StorageHeader.hpp"
 
 namespace f2f
 {
@@ -43,7 +44,6 @@ public:
 
   IStorage & storage() const { return m_storage; }
 
-  // TODO: return ranges instead?
   BlockAddress allocateBlock();
   void allocateBlocks(uint64_t numBlocks, std::function<void (BlockAddress const &)> const & visitor);
   void releaseBlocks(BlockAddress blockIndex, unsigned numBlocks);
@@ -53,10 +53,12 @@ public:
   void check() const;
   void checkAllocatedBlock(BlockAddress blockIndex) const;
   void enumerateAllocatedBlocks(std::function<void(BlockAddress const &)> const & visitor) const;
+  uint64_t blocksCount() const { return m_blocksCount; }
 
 private:
   IStorage & m_storage;
   uint64_t m_blocksCount;
+  format::StorageHeader m_storageHeader;
 
   bool allocateBlocksLevel0(uint64_t & numBlocks,
     std::function<void(BlockAddress const &)> const & visitor,
@@ -70,6 +72,9 @@ private:
   bool markBlocksAsFree(uint64_t beginBlockInGroup, uint64_t endBlockInGroup,
     unsigned level, uint64_t absoluteOffset, uint64_t blocksOffset);
   int64_t findStartOfFreeBlocksRange(uint64_t blockIndex) const;
+
+  struct CheckState;
+  bool checkLevel(CheckState &, unsigned level, uint64_t absoluteOffset, uint64_t blocksOffset) const;
 
   static uint64_t getOccupancyBlockPosition(uint64_t groupIndex);
   static uint64_t getBlockGroupIndex(uint64_t blockIndex);

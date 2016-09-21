@@ -43,7 +43,7 @@ TEST(Directory, T1)
 
   for(int repeat = 0; repeat < 100; ++repeat)
   {
-    f2f::StorageInMemory storage;
+    StorageInMemory storage;
     std::unique_ptr<f2f::BlockStorage> blockStorage(new f2f::BlockStorage(storage, true));
     std::unique_ptr<f2f::Directory> directory(new f2f::Directory(*blockStorage, f2f::Directory::NoParentDirectory));
   
@@ -89,7 +89,7 @@ TEST(Directory, T1)
         if (collision_dist(random_engine) < 50'000)
           blockStorage.reset(new f2f::BlockStorage(storage));
 
-        directory.reset(new f2f::Directory(*blockStorage, inodeIndex, f2f::OpenMode::ReadWrite));
+        directory.reset(new f2f::Directory(*blockStorage, inodeIndex));
       }
 
       if (collision_dist(random_engine) == 1)

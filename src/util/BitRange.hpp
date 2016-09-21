@@ -64,6 +64,14 @@ void SetBitRange(BitmapWord * bits, unsigned beginPosition, unsigned endPosition
 }
 
 template<class BitmapWord>
+bool GetBit(BitmapWord const * bits, unsigned position)
+{
+  static_assert(std::is_unsigned<BitmapWord>::value, "");
+
+  return (bits[position / (sizeof(BitmapWord) * 8)] & (BitmapWord(1) << (position % (sizeof(BitmapWord) * 8)))) != 0;
+}
+
+template<class BitmapWord>
 void SetBit(BitmapWord * bits, unsigned position)
 {
   static_assert(std::is_unsigned<BitmapWord>::value, "");

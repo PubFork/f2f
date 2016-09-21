@@ -3,16 +3,11 @@
 #include <vector>
 #include "f2f/IStorage.hpp"
 
-namespace f2f
-{
-
-class StorageInMemory: public IStorage
+class StorageInMemory: public f2f::IStorage
 {
 public:
-  StorageInMemory(OpenMode = OpenMode::ReadWrite);
+  StorageInMemory(f2f::OpenMode = f2f::OpenMode::ReadWrite);
 
-  OpenMode openMode() const override { return m_mode; }
-  uint64_t sizeLimit() const override { return std::numeric_limits<size_t>::max(); }
   uint64_t size() const override { return m_data.size(); }
   void read(uint64_t position, size_t size, void *) const override;
   void write(uint64_t position, size_t size, void const *) override;
@@ -21,8 +16,6 @@ public:
   std::vector<char> & data() { return m_data; }
 
 private:
-  OpenMode m_mode;
+  f2f::OpenMode m_mode;
   std::vector<char> m_data;
 };
-
-}

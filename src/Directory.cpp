@@ -71,29 +71,24 @@ typedef DirectoryTreeLeafItemIteratorT<format::DirectoryTreeLeafItem const> Dire
 
 const BlockAddress Directory::NoParentDirectory = BlockAddress::fromBlockIndex(std::numeric_limits<uint64_t>::max());
 
-Directory::Directory(BlockStorage & blockStorage, BlockAddress const & parentAddress)
+Directory::Directory(BlockStorage & blockStorage, BlockAddress const & parentAddress, create_tag)
   : m_blockStorage(blockStorage)
   , m_storage(blockStorage.storage())
-  , m_openMode(OpenMode::ReadWrite)
 {
-  checkOpenMode();
-
   m_inodeAddress = m_blockStorage.allocateBlock();
   memset(&m_inode, 0, sizeof(m_inode));
   m_inode.parentDirectoryInode = 
     parentAddress == NoParentDirectory ? m_inodeAddress.index() : parentAddress.index();
   m_inode.levelsCount = 0;
   m_inode.directReferences.dataSize = 0;
-  util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
+  util::writeT(m_storage, m_inodeAddress, m_inode);
 }
 
-Directory::Directory(BlockStorage & blockStorage, BlockAddress const & inodeAddress, OpenMode openMode)
+Directory::Directory(BlockStorage & blockStorage, BlockAddress const & inodeAddress)
   : m_blockStorage(blockStorage)
   , m_storage(blockStorage.storage())
   , m_inodeAddress(inodeAddress)
-  , m_openMode(openMode)
 {
-  checkOpenMode();
   util::readT(m_storage, inodeAddress, m_inode);
 
   F2F_FORMAT_ASSERT(m_inode.levelsCount < 100);
@@ -101,12 +96,6 @@ Directory::Directory(BlockStorage & blockStorage, BlockAddress const & inodeAddr
     F2F_FORMAT_ASSERT(m_inode.indirectReferences.itemsCount <= m_inode.indirectReferences.MaxCount);
   else
     F2F_FORMAT_ASSERT(m_inode.directReferences.dataSize <= m_inode.directReferences.MaxDataSize);
-}
-
-void Directory::checkOpenMode()
-{
-  if (m_openMode == OpenMode::ReadWrite && m_storage.openMode() == OpenMode::ReadOnly)
-    throw OpenModeError("Can't open for write: storage is in in read-only mode ");
 }
 
 BlockAddress Directory::parentInodeAddress() const
@@ -303,7 +292,7 @@ boost::optional<format::DirectoryTreeChildNodeReference> Directory::insertInNode
           std::make_reverse_iterator(newNode.children),
           std::make_reverse_iterator(children + itemsCountToLeave)));
 
-      util::writeT(m_storage, newBlock.absoluteAddress(), newNode);
+      util::writeT(m_storage, newBlock, newNode);
       itemsCount = itemsCountToLeave;
       format::DirectoryTreeChildNodeReference newNodeReference;
       newNodeReference.childBlockIndex = newBlock.index();
@@ -397,7 +386,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
       nextLeafNode = newBlock.index();
       newLeaf.dataSize = sumSize - splitBy;
       memcpy(&newLeaf.head, sumData + splitBy, newLeaf.dataSize);
-      util::writeT(m_storage, newBlock.absoluteAddress(), newLeaf);
+      util::writeT(m_storage, newBlock, newLeaf);
       format::DirectoryTreeChildNodeReference reference;
       reference.childBlockIndex = newBlock.index();
       reference.nameHash = newLeaf.head.nameHash;
@@ -418,7 +407,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
       newLeaf.nextLeafNode = newBlock2.index();
       newLeaf.dataSize = afterMid - beforeMid;
       memcpy(&newLeaf.head, sumData + beforeMid, newLeaf.dataSize);
-      util::writeT(m_storage, newBlock1.absoluteAddress(), newLeaf);
+      util::writeT(m_storage, newBlock1, newLeaf);
 
       format::DirectoryTreeChildNodeReference reference;
       reference.childBlockIndex = newBlock1.index();
@@ -429,7 +418,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
       newLeaf.nextLeafNode = nextLeafNode;
       newLeaf.dataSize = sumSize - afterMid;
       memcpy(&newLeaf.head, sumData + afterMid, newLeaf.dataSize);
-      util::writeT(m_storage, newBlock2.absoluteAddress(), newLeaf);
+      util::writeT(m_storage, newBlock2, newLeaf);
 
       reference.childBlockIndex = newBlock2.index();
       reference.nameHash = newLeaf.head.nameHash;
@@ -451,9 +440,6 @@ unsigned Directory::getSizeOfLeafRecord(utf8string_t const & fileName)
 
 void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string_t const & fileName)
 {
-  if (m_openMode == OpenMode::ReadOnly)
-    throw OpenModeError("Can't modify: directory is opened as read-only");
-
   uint64_t inode;
   switch (fileType)
   {
@@ -488,7 +474,7 @@ void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string
         inode, nameHash, fileName, 
         newLeaf.head, newLeaf.nextLeafNode, newLeaf.dataSize, newLeaf.MaxDataSize, isNewLeafDirty);
 
-      util::writeT(m_storage, newBlock.absoluteAddress(), newLeaf);
+      util::writeT(m_storage, newBlock, newLeaf);
       m_inode.levelsCount = 1;
       m_inode.indirectReferences.itemsCount = 1;
       m_inode.indirectReferences.children[0].nameHash = 0;
@@ -530,14 +516,14 @@ void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string
         m_inode.indirectReferences.children,
         newNode.itemsCount,
         newNode.children);
-      util::writeT(m_storage, newBlock1.absoluteAddress(), newNode);
+      util::writeT(m_storage, newBlock1, newNode);
 
       newNode.itemsCount = m_inode.indirectReferences.itemsCount - nodesInBlock1;
       std::copy_n(
         m_inode.indirectReferences.children + nodesInBlock1,
         newNode.itemsCount,
         newNode.children);
-      util::writeT(m_storage, newBlock2.absoluteAddress(), newNode);
+      util::writeT(m_storage, newBlock2, newNode);
 
       ++m_inode.levelsCount;
       m_inode.indirectReferences.itemsCount = 2;
@@ -556,7 +542,7 @@ void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string
     assert(!newChild);
   }
   if (inodeIsDirty)
-    util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
+    util::writeT(m_storage, m_inodeAddress, m_inode);
 }
 
 boost::optional<uint64_t> Directory::removeFromNode(NameHash_t nameHash, utf8string_t const & fileName,
@@ -624,6 +610,8 @@ boost::optional<uint64_t> Directory::removeFromNode(
       && item->nameSize == fileName.size()
       && std::equal(item->name, item->name + item->nameSize, fileName.begin(), fileName.end()))
     {
+      isDirty = true;
+
       auto inode = item->inode;
 
       auto offset = item.offsetInBytes();
@@ -652,9 +640,6 @@ boost::optional<uint64_t> Directory::removeFromNode(
 
 boost::optional<std::pair<BlockAddress, FileType>> Directory::removeFile(utf8string_t const & fileName) 
 {
-  if (m_openMode == OpenMode::ReadOnly)
-    throw OpenModeError("Can't modify: directory is opened as read-only");
-
   bool inodeIsDirty = false;
   boost::optional<uint64_t> removedInode;
 
@@ -676,7 +661,7 @@ boost::optional<std::pair<BlockAddress, FileType>> Directory::removeFile(utf8str
       inodeIsDirty);
   }
   if (inodeIsDirty)
-    util::writeT(m_storage, m_inodeAddress.absoluteAddress(), m_inode);
+    util::writeT(m_storage, m_inodeAddress, m_inode);
 
   if (removedInode)
     return std::make_pair(
@@ -690,9 +675,6 @@ boost::optional<std::pair<BlockAddress, FileType>> Directory::removeFile(utf8str
 
 void Directory::remove(OnDeleteFileFunc_t const & onDeleteFile)
 {
-  if (m_openMode == OpenMode::ReadOnly)
-    throw OpenModeError("Can't remove: directory is opened as read-only");
-
   if (m_inode.levelsCount == 0)
     removeNode(onDeleteFile, m_inode.directReferences.head, m_inode.directReferences.dataSize);
   else

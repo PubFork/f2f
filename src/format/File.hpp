@@ -47,17 +47,6 @@ struct BlockRangesLeafNode
   BlockRange ranges[MaxCount];
 };
 
-/*struct BlockRangesNode
-{
-  uint16_t isLeafNode;
-
-  union
-  {
-    BlockRangesLeafNode leaf;
-    BlockRangesInternalNode internal;
-  };
-};*/
-
 static_assert(sizeof(BlockRangesInternalNode) <= AddressableBlockSize, "");
 static_assert(sizeof(BlockRangesLeafNode) <= AddressableBlockSize, "");
 

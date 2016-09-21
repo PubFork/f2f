@@ -37,7 +37,6 @@ private:
   FileBlocks m_fileBlocks;
   uint64_t m_position;
 
-  void checkOpenMode();
   void processData(size_t size, std::function<void(uint64_t, unsigned int)> const & func);
 };
 
