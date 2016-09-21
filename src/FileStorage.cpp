@@ -1,6 +1,7 @@
 #include "f2f/FileStorage.hpp"
 #include <fstream>
 #include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>
 
 namespace f2f
 {

@@ -5,6 +5,7 @@
 #include "util/StorageT.hpp"
 #include "util/FNVHash.hpp"
 #include "util/Algorithm.hpp"
+#include <boost/iterator.hpp>
 
 namespace f2f
 {
@@ -187,7 +188,7 @@ boost::optional<uint64_t> Directory::searchInNode(
   {
     if (nameHash == item->nameHash 
       && item->nameSize == fileName.size()
-      && std::equal(item->name, item->name + item->nameSize, fileName.begin(), fileName.end()))
+      && std::equal(item->name, item->name + item->nameSize, fileName.begin()))
       return item->inode;
   }
   return {};
@@ -288,9 +289,9 @@ boost::optional<format::DirectoryTreeChildNodeReference> Directory::insertInNode
         position + 1,
         newChildren.begin(), newChildren.end(),
         util::MakeSplitOutputIterator(
-          std::make_reverse_iterator(newNode.children + newNode.itemsCount),
-          std::make_reverse_iterator(newNode.children),
-          std::make_reverse_iterator(children + itemsCountToLeave)));
+          boost::make_reverse_iterator(newNode.children + newNode.itemsCount),
+          boost::make_reverse_iterator(newNode.children),
+          boost::make_reverse_iterator(children + itemsCountToLeave)));
 
       util::writeT(m_storage, newBlock, newNode);
       itemsCount = itemsCountToLeave;
@@ -316,7 +317,7 @@ std::vector<format::DirectoryTreeChildNodeReference> Directory::insertInNode(
   {
     if (nameHash == position->nameHash
       && position->nameSize == fileName.size()
-      && std::equal(position->name, position->name + position->nameSize, fileName.begin(), fileName.end()))
+      && std::equal(position->name, position->name + position->nameSize, fileName.begin()))
       throw FileExistsError(position->inode & format::DirectoryTreeLeafItem::DirectoryFlag
         ? FileType::Directory
         : FileType::Regular);
@@ -608,7 +609,7 @@ boost::optional<uint64_t> Directory::removeFromNode(
   {
     if (nameHash == item->nameHash
       && item->nameSize == fileName.size()
-      && std::equal(item->name, item->name + item->nameSize, fileName.begin(), fileName.end()))
+      && std::equal(item->name, item->name + item->nameSize, fileName.begin()))
     {
       isDirty = true;
 

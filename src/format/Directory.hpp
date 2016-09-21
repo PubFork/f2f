@@ -52,7 +52,8 @@ struct DirectoryTreeInternalNode
   DirectoryTreeChildNodeReference children[MaxCount];
 };
 
-static const unsigned MaxFileNameSize = DirectoryTreeLeafHeader::MaxDataSize - offsetof(DirectoryTreeLeaf, head.name);
+static const unsigned MaxFileNameSize = DirectoryTreeLeafHeader::MaxDataSize
+        - offsetof(DirectoryTreeLeafHeader, head) - offsetof(DirectoryTreeLeafItem, name);
 
 struct DirectoryInode : InodeHeader
 {

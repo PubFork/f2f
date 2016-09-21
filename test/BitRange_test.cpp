@@ -99,13 +99,13 @@ inline void FindAndSetFirstZeroBitT()
   T * range = reinterpret_cast<T *>(range32);
   static const int WordCount = sizeof(range32)/sizeof(T);
 
-  std::fill(std::begin(range32), std::end(range32), 0xFFFFFFFFui32);
+  std::fill(std::begin(range32), std::end(range32), UINT32_C(0xFFFFFFFF));
   int nextWordWithZeroBit;
   EXPECT_EQ(-1, f2f::util::FindAndSetFirstZeroBit(range, 0, WordCount, nextWordWithZeroBit));
-  range32[2] = 0b1111'1111'1011'1111'1111'1011'1111'1111ui32;
-  range32[3] = 0b1111'1111'1111'1111'1111'1111'1111'1110ui32;
+  range32[2] = UINT32_C(0b1111'1111'1011'1111'1111'1011'1111'1111);
+  range32[3] = UINT32_C(0b1111'1111'1111'1111'1111'1111'1111'1110);
   EXPECT_EQ(2 * 32 + 10, f2f::util::FindAndSetFirstZeroBit(range, 0, WordCount, nextWordWithZeroBit));
-  EXPECT_EQ(0b1111'1111'1011'1111'1111'1111'1111'1111ui32, range32[2]);
+  EXPECT_EQ(UINT32_C(0b1111'1111'1011'1111'1111'1111'1111'1111), range32[2]);
   //EXPECT_EQ(2, nextWordWithZeroBit);
   EXPECT_EQ(2 * 32 + 22, f2f::util::FindAndSetFirstZeroBit(range, nextWordWithZeroBit, WordCount, nextWordWithZeroBit));
   //EXPECT_EQ(3, nextWordWithZeroBit);
@@ -141,7 +141,7 @@ TEST(BitRange, FindLastSetBit)
   uint32_t const range1[] = { 1, 0 };
   EXPECT_EQ(0, f2f::util::FindLastSetBit(range1, 32*2));
 
-  uint32_t const range2[] = { 0xFFFFFFFFui32, 0b1001'1111'1000'0000'0000'0011'1111'1111ui32 };
+  uint32_t const range2[] = { UINT32_C(0xFFFFFFFF), UINT32_C(0b1001'1111'1000'0000'0000'0011'1111'1111) };
   EXPECT_EQ(63, FindLastSetBitWrapper(range2, 32 * 2));
   EXPECT_EQ(60, FindLastSetBitWrapper(range2, 32 + 31));
   EXPECT_EQ(55, FindLastSetBitWrapper(range2, 32 + 24));

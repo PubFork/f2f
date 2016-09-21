@@ -2,9 +2,19 @@
 #include "f2f/FileSystem.hpp"
 #include "f2f/FileStorage.hpp"
 #include <boost/filesystem.hpp>
+#include <boost/filesystem/fstream.hpp>
 #include <random>
 
 namespace fs = boost::filesystem;
+
+#if BOOST_VERSION <= 105500
+namespace boost { namespace filesystem {
+inline directory_iterator begin(directory_iterator const & it)
+{ return it; }
+inline directory_iterator end(directory_iterator const &)
+{ return directory_iterator(); }
+}}
+#endif
 
 namespace
 {

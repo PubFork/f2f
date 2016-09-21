@@ -1,4 +1,7 @@
 #include "StorageInMemory.hpp"
+#include <algorithm>
+#include <stdexcept>
+#include <limits>
 
 StorageInMemory::StorageInMemory(f2f::OpenMode mode)
   : m_mode(mode)

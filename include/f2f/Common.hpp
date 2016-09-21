@@ -1,6 +1,8 @@
 #ifndef _F2F_API_COMMON_H
 #define _F2F_API_COMMON_H
 
+#include <stddef.h>
+
 namespace f2f
 {
 

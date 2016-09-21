@@ -2,11 +2,15 @@ cmake_minimum_required (VERSION 2.8)
 
 project(f2f)
 
+if (UNIX)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14")
+endif()
+
 set(Boost_USE_STATIC_LIBS        ON) # only find static libs
 set(Boost_USE_MULTITHREADED      ON)
 set(Boost_USE_STATIC_RUNTIME    OFF)
 
-find_package(Boost REQUIRED COMPONENTS filesystem)
+find_package(Boost REQUIRED COMPONENTS filesystem system)
 
 include_directories(
   ${Boost_INCLUDE_DIRS}
@@ -84,6 +88,10 @@ add_library(f2f SHARED
   ${SOURCES}
 )
 
+target_include_directories(f2f
+  PRIVATE src
+)
+
 target_compile_definitions(f2f
   PRIVATE F2F_API_EXPORTS
 )
@@ -91,6 +99,10 @@ target_compile_definitions(f2f
 set_property(TARGET f2f PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(f2f ${Boost_LIBRARIES})
+
+if (UNIX)
+  target_link_libraries(f2f pthread)
+endif()
 
 set(TEST_SOURCES
   test/Algorithm_test.cpp 
@@ -138,6 +150,12 @@ target_include_directories(f2f_unittest
   PRIVATE 3rdparty/gtest
   PRIVATE src
 )
+
+target_link_libraries(f2f_unittest ${Boost_LIBRARIES})
+
+if (UNIX)
+  target_link_libraries(f2f_unittest pthread)
+endif()
 
 set(API_TEST_SOURCES
   test/FileSystem_test.cpp 
