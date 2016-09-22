@@ -1,7 +1,7 @@
 #include "File.hpp"
+#include "util/Assert.hpp"
 #include "util/StorageT.hpp"
 #include "util/FloorDiv.hpp"
-#include "Exception.hpp"
 
 namespace f2f
 {
@@ -69,9 +69,9 @@ void File::read(size_t & inOutSize, void * buffer)
 void File::write(size_t size, void const * buffer)
 {
   if (m_openMode == OpenMode::ReadOnly)
-    throw OpenModeError("Can't write: file is opened as read-only");
+    throw FileSystemError(ErrorCode::OperationRequiresWriteAccess, "Can't write: file is opened as read-only");
   if (size > std::numeric_limits<uint64_t>::max() - m_position)
-    throw std::runtime_error("File size limit");
+    throw FileSystemError(ErrorCode::StorageLimitReached, "File size limit reached");
   if (size == 0)
     return;
   if (m_position + size > m_inode.fileSize)
@@ -99,7 +99,7 @@ void File::write(size_t size, void const * buffer)
             offset += chunkSize;
           }
         });
-      assert(m_position == savedPosition);
+      F2F_ASSERT(m_position == savedPosition);
     }
   }
 
@@ -118,8 +118,7 @@ void File::processData(size_t size, std::function<void (uint64_t, unsigned)> con
   for (m_fileBlocks.seek(blockIndex);;
     m_fileBlocks.moveToNextRange())
   {
-    if (m_fileBlocks.eof())
-      throw std::runtime_error("Internal error");
+    F2F_ASSERT(!m_fileBlocks.eof());
     FileBlocks::OffsetAndSize offsetAndSize = m_fileBlocks.currentRange();
     auto absoluteAddress = offsetAndSize.first.absoluteAddress(); // Convert blocks to bytes
     unsigned bytesToReadFromRange = offsetAndSize.second * format::AddressableBlockSize;

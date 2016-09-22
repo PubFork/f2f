@@ -24,7 +24,7 @@ protected:
   Impl * m_impl;
 };
 
-// Directory can be deleted while being iterated.
+// Directory can be deleted or modified while being iterated.
 // In this case next increment of the iterator will make it equal to end()
 //
 // Similar to C++ InputIterator concept. Only guarantee validity for single pass algorithms: once an 

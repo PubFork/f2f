@@ -141,19 +141,7 @@ void CompareFiles(f2f::FileSystem const & fs, fs::path const & f2f_path, fs::pat
     f2f_file.read(f2f_read, buffer1.data());
     os_file.read(buffer2.data(), blockSize);
     EXPECT_EQ(f2f_read, os_file.gcount());
-    if (f2f_read != os_file.gcount())
-    {
-      volatile int n = 0;
-      volatile uint64_t pos = f2f_file.position();
-      ++n;
-    }
     EXPECT_EQ(0, memcmp(buffer1.data(), buffer2.data(), f2f_read));
-    if (memcmp(buffer1.data(), buffer2.data(), f2f_read) != 0)
-    {
-      volatile int n = 0;
-      volatile uint64_t pos = f2f_file.position();
-      ++n;
-    }
     if (f2f_read < blockSize)
       break;
   }
@@ -186,8 +174,8 @@ void CompareDirectories(f2f::FileSystem const & fs, fs::path const & f2f_dir, fs
 
 TEST(FileSystem, LoadTest)
 {
-  fs::path testRootDir("f2f.test");
-  static const char FileStorageName[] = "f2f.stg";
+  fs::path testRootDir("f2f_LoadTest.root");
+  static const char FileStorageName[] = "f2f_LoadTest.stg";
 
   std::ofstream log("f2f_LoadTest.log");
 
@@ -195,136 +183,147 @@ TEST(FileSystem, LoadTest)
   fs::create_directory(testRootDir);
   fs::remove(FileStorageName);
 
-  std::unique_ptr<f2f::FileSystem> fs(new f2f::FileSystem(f2f::OpenFileStorage(FileStorageName), true));
-
-  std::vector<char> buffer(500'000);
-  std::minstd_rand random_engine;
-  std::uniform_int_distribution<> action_dist(0, 100);
-  std::uniform_int_distribution<> check_dist(0, 100000);
-  for(int i=0; i<1'000'000; ++i)
+  try
   {
-    if (i % 10000 == 0)
-      std::cout << "Step " << i << std::endl;
+    std::unique_ptr<f2f::FileSystem> fs(new f2f::FileSystem(f2f::OpenFileStorage(FileStorageName), true));
 
-    auto action = action_dist(random_engine);
-    if (action < 20)
+    std::vector<char> buffer(500'000);
+    std::minstd_rand random_engine;
+    std::uniform_int_distribution<> action_dist(0, 100);
+    std::uniform_int_distribution<> check_dist(0, 100000);
+    for(int i=0; i<1'000'000; ++i)
     {
-      // Create file or directory
-      bool create_directory = action < 2;
-      fs::path currentDir = FindRandomDir(random_engine, testRootDir);
-      auto randomName = CreateRandomName(random_engine);
-      fs::path currentDirF2F(RemovePathRoot(currentDir));
-      if (!fs::exists(currentDir / randomName))
-        // TODO: Try to create existing dirs/files and check for errors
-        if (create_directory)
-        {
-          log << "Create directory \"" << (currentDirF2F / randomName).generic_string() << "\"" << std::endl;
-          fs->createDirectory((currentDirF2F / randomName).generic_string().c_str());
-          fs::create_directory(currentDir / randomName);
-        }
-        else
-        {
-          auto fileDescriptor = fs->open((currentDirF2F / randomName).generic_string().c_str(), f2f::OpenMode::ReadWrite);
-          EXPECT_TRUE(fileDescriptor.isOpen());
-          fs::ofstream file(currentDir / randomName, std::ios::binary);
-          auto blocksNum = std::uniform_int_distribution<>(0, 10)(random_engine);
-          for(int i=0; i<blocksNum; ++i)
-          {
-            auto blockSize = std::uniform_int_distribution<>(0, 10000)(random_engine);
-            GenerateRandomData(random_engine, buffer.data(), blockSize);
-            fileDescriptor.write(blockSize, buffer.data());
-            file.write(buffer.data(), blockSize);
-          }
-          log << "Create file \"" << (currentDirF2F / randomName).generic_string() << "\" " << fileDescriptor.size() << " bytes" << std::endl;
-        }
-    } 
-    else if (action < 33)
-    {
-      // Delete file or directory
-      bool isDir;
-      auto path = FindRandomPath(random_engine, testRootDir, isDir);
-      if (!path.empty())
+      if (i % 10000 == 0)
+        std::cout << "Step " << i << std::endl;
+
+      auto action = action_dist(random_engine);
+      if (action < 20)
       {
-        if (!isDir || action_dist(random_engine) < 5)
-        {
-          log << "Delete \"" << RemovePathRoot(path).generic_string() << "\"" << std::endl;
-          fs->remove(RemovePathRoot(path).generic_string().c_str());
-          if (!isDir)
-            fs::remove(path);
+        // Create file or directory
+        bool create_directory = action < 2;
+        fs::path currentDir = FindRandomDir(random_engine, testRootDir);
+        auto randomName = CreateRandomName(random_engine);
+        fs::path currentDirF2F(RemovePathRoot(currentDir));
+        if (!fs::exists(currentDir / randomName))
+          // TODO: Try to create existing dirs/files and check for errors
+          if (create_directory)
+          {
+            log << "Create directory \"" << (currentDirF2F / randomName).generic_string() << "\"" << std::endl;
+            fs->createDirectory((currentDirF2F / randomName).generic_string().c_str());
+            fs::create_directory(currentDir / randomName);
+          }
           else
           {
-            try
+            auto fileDescriptor = fs->open((currentDirF2F / randomName).generic_string().c_str(), f2f::OpenMode::ReadWrite);
+            EXPECT_TRUE(fileDescriptor.isOpen());
+            fs::ofstream file(currentDir / randomName, std::ios::binary);
+            auto blocksNum = std::uniform_int_distribution<>(0, 10)(random_engine);
+            for(int i=0; i<blocksNum; ++i)
             {
-              fs::remove_all(path);
-            } catch(const fs::filesystem_error & )
-            {
-#ifdef _WIN32
-              // On Windows for some unknown reason "The directory is not empty" error is thrown sometimes
-              // and retrying operation helps
-              fs::remove_all(path);
-#else
-              throw;
-#endif
+              auto blockSize = std::uniform_int_distribution<>(0, 10000)(random_engine);
+              GenerateRandomData(random_engine, buffer.data(), blockSize);
+              fileDescriptor.write(blockSize, buffer.data());
+              file.write(buffer.data(), blockSize);
             }
-          }          
-        }
-      }
-    }
-    else if (action < 40)
-    {
-      // Write to file
-      bool isDir;
-      auto path = FindRandomPath(random_engine, testRootDir, isDir);
-      if (!path.empty() && !isDir)
+            log << "Create file \"" << (currentDirF2F / randomName).generic_string() << "\" " << fileDescriptor.size() << " bytes" << std::endl;
+          }
+      } 
+      else if (action < 33)
       {
-        RandomWriteToFiles(*fs, RemovePathRoot(path), path, log);
-      }
-    }
-    else if (action < 42)
-    {
-      // Truncate file
-      bool isDir;
-      auto path = FindRandomPath(random_engine, testRootDir, isDir);
-      if (!path.empty() && !isDir)
-      {
-        auto f2f_file = fs->open(RemovePathRoot(path).generic_string().c_str(), f2f::OpenMode::ReadWrite);
-        if (f2f_file.size() > 0)
+        // Delete file or directory
+        bool isDir;
+        auto path = FindRandomPath(random_engine, testRootDir, isDir);
+        if (!path.empty())
         {
-          auto dest_size = std::uniform_int_distribution<>(0, f2f_file.size())(random_engine);
-          f2f_file.seek(dest_size);
-          f2f_file.truncate();
-          fs::resize_file(path, dest_size);
-
-          log << "Truncate \"" << RemovePathRoot(path).generic_string() << "\" at " << dest_size << std::endl;
+          if (!isDir || action_dist(random_engine) < 5)
+          {
+            log << "Delete \"" << RemovePathRoot(path).generic_string() << "\"" << std::endl;
+            fs->remove(RemovePathRoot(path).generic_string().c_str());
+            if (!isDir)
+              fs::remove(path);
+            else
+            {
+              try
+              {
+                fs::remove_all(path);
+              } catch(const fs::filesystem_error & )
+              {
+  #ifdef _WIN32
+                // On Windows for some unknown reason "The directory is not empty" error is thrown sometimes
+                // and retrying operation helps
+                fs::remove_all(path);
+  #else
+                throw;
+  #endif
+              }
+            }          
+          }
         }
       }
-    }
-    else if (action == 100)
-    {
-      // Reload storage
-      log << "Reload storage" << std::endl;
-      fs.reset();
-      fs.reset(new f2f::FileSystem(f2f::OpenFileStorage(FileStorageName), false));
+      else if (action < 40)
+      {
+        // Write to file
+        bool isDir;
+        auto path = FindRandomPath(random_engine, testRootDir, isDir);
+        if (!path.empty() && !isDir)
+        {
+          RandomWriteToFiles(*fs, RemovePathRoot(path), path, log);
+        }
+      }
+      else if (action < 42)
+      {
+        // Truncate file
+        bool isDir;
+        auto path = FindRandomPath(random_engine, testRootDir, isDir);
+        if (!path.empty() && !isDir)
+        {
+          auto f2f_file = fs->open(RemovePathRoot(path).generic_string().c_str(), f2f::OpenMode::ReadWrite);
+          if (f2f_file.size() > 0)
+          {
+            auto dest_size = std::uniform_int_distribution<>(0, f2f_file.size())(random_engine);
+            f2f_file.seek(dest_size);
+            f2f_file.truncate();
+            fs::resize_file(path, dest_size);
+
+            log << "Truncate \"" << RemovePathRoot(path).generic_string() << "\" at " << dest_size << std::endl;
+          }
+        }
+      }
+      else if (action == 100)
+      {
+        // Reload storage
+        log << "Reload storage" << std::endl;
+        fs.reset();
+        fs.reset(new f2f::FileSystem(f2f::OpenFileStorage(FileStorageName), false));
+      }
+
+      if (check_dist(random_engine) == 0)
+      {
+        // Perform full comparison
+        std::cout << "Performing full comparison" << std::endl;
+        CompareDirectories(*fs, fs::path(), testRootDir);
+      }
+
+      if (check_dist(random_engine) < 10)
+      {
+        // File system check
+        std::cout << "Checking file system" << std::endl;
+        fs->check();
+      }
     }
 
-    if (check_dist(random_engine) == 0)
+    // Remove all
+    for(auto const & entry : fs->directoryIterator(""))
     {
-      // Perform full comparison
-      std::cout << "Performing full comparison" << std::endl;
-      CompareDirectories(*fs, fs::path(), testRootDir);
-    }
-
-    if (check_dist(random_engine) < 10)
-    {
-      // File system check
-      std::cout << "Checking file system" << std::endl;
-      fs->check();
+      fs->remove(entry.name().c_str());
     }
   }
-
-  // Remove all
-  for(auto const & entry : fs->directoryIterator(""))
+  catch (...)
   {
-    fs->remove(entry.name().c_str());
+    fs::remove_all(testRootDir);
+    fs::remove(FileStorageName);
+    throw;
   }
+  fs::remove_all(testRootDir);
+  fs::remove(FileStorageName);
 }

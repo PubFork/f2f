@@ -1,4 +1,5 @@
 #include "FileDescriptorImpl.hpp"
+#include "f2f/FileSystemError.hpp"
 
 namespace f2f
 {
@@ -70,7 +71,7 @@ void FileDescriptor::close()
 [[noreturn]]
 inline void ThrowNotOpened()
 {
-  throw std::runtime_error("File isn't opened");
+  throw FileSystemError(ErrorCode::OperationRequiresOpenedFile, "File isn't opened");
 }
 
 void FileDescriptor::seek(uint64_t position)

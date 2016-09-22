@@ -50,3 +50,38 @@ TEST(FileSystem, DeleteOpenedFile)
     }
   }
 }
+
+TEST(FileSystem, DeleteIteratedDirectory)
+{
+  for(int c = 0; c < 3; ++c)
+  {
+    f2f::FileSystem fs(std::unique_ptr<f2f::IStorage>(new StorageInMemory(f2f::OpenMode::ReadWrite)), true);
+    fs.createDirectory("root");
+    fs.createDirectory("root/dir1");
+    fs.createDirectory("root/dir2");
+    fs.createDirectory("root/dir3");
+    fs.createDirectory("root/dir4");
+    auto it = fs.directoryIterator("root");
+    EXPECT_TRUE(it != f2f::DirectoryIterator());
+    ++it;
+    EXPECT_TRUE(it != f2f::DirectoryIterator());
+    auto dirName = it->name();
+    switch(c)
+    {
+    case 0:
+      fs.remove("root");
+      break;
+    case 1:
+      fs.createDirectory("root/dir5");
+      break;
+    case 2:
+      fs.remove("root/dir1");
+      break;
+    }
+    
+    EXPECT_TRUE(it != f2f::DirectoryIterator());
+    EXPECT_EQ(dirName, it->name());
+    ++it;
+    EXPECT_FALSE(it != f2f::DirectoryIterator());
+  }
+}

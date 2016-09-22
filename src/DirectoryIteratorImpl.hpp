@@ -15,7 +15,7 @@ public:
     std::shared_ptr<FileSystemImpl> const & owner,
     std::string const & directoryPath,
     BlockAddress const & inodeAddress,
-    bool & directoryIsDeleted, 
+    std::function<bool()> const & isIteratorValid,
     std::function<void()> const & onFinishIteration);
   ~DirectoryIteratorImpl();
 
@@ -26,7 +26,7 @@ private:
 public:
   std::string const m_directoryPath;
   Directory::Iterator m_iterator;
-  bool & m_directoryIsDeleted;
+  std::function<bool()> m_isIteratorValid;
   std::function<void()> m_onFinishIteration;
 
   class DirectoryEntry: public f2f::DirectoryEntry

@@ -1,7 +1,7 @@
 #include "FileBlocks.hpp"
+#include "util/Assert.hpp"
 #include "util/StorageT.hpp"
 #include "util/FloorDiv.hpp"
-#include "Exception.hpp"
 
 namespace f2f
 {
@@ -28,15 +28,13 @@ FileBlocks::FileBlocks(
 
 FileBlocks::OffsetAndSize const & FileBlocks::currentRange() const
 { 
-  if (!m_position)
-    throw std::runtime_error("Expectation fail: seek must have been called");
+  F2F_ASSERT(m_position); // seek must have been called
   return m_position->range;
 }
 
 void FileBlocks::moveToNextRange()
 {
-  if (!m_position)
-    throw std::runtime_error("Expectation fail: seek must have been called");
+  F2F_ASSERT(m_position); // seek must have been called
 
   if (m_position->indexInBlock < m_position->block.itemsCount)
     ++m_position->indexInBlock;
@@ -58,8 +56,7 @@ void FileBlocks::moveToNextRange()
 
 bool FileBlocks::eof() const
 {
-  if (!m_position)
-    throw std::runtime_error("Expectation fail: seek must have been called");
+  F2F_ASSERT(m_position); // seek must have been called
 
   return m_position->indexInBlock == m_position->block.itemsCount;
 }
@@ -97,8 +94,7 @@ void FileBlocks::seekInNode(uint64_t keyBlockIndex, format::BlockRange const * r
   if (position == ranges + itemsCount
     || position->fileOffset > keyBlockIndex)
     --position;
-  if (position->fileOffset > keyBlockIndex || keyBlockIndex >= position->fileOffset + position->blocksCount)
-    throw std::runtime_error("Expectation fail: node not found");
+  F2F_ASSERT(position->fileOffset <= keyBlockIndex && keyBlockIndex < position->fileOffset + position->blocksCount);
 
   if (!m_position || m_position->block.ranges != ranges)
   {
@@ -240,7 +236,7 @@ void FileBlocks::appendRootT(uint64_t numBlocks, typename Traits::NodeType & nod
       m_treeRootBlockIsDirty = true;
 
       // We shouldn't need another level if inode isn't filled up yet
-      assert(childrenToAdd.empty());
+      F2F_ASSERT(childrenToAdd.empty());
 
       // Copy changed/added values back to inode. Last direct range may be extended with new adjacent blocks
       std::copy_n(
@@ -252,7 +248,7 @@ void FileBlocks::appendRootT(uint64_t numBlocks, typename Traits::NodeType & nod
     }
   }
   else
-    assert(childrenToAdd.empty());
+    F2F_ASSERT(childrenToAdd.empty());
 
   while (childrenToAdd.size() > format::FileInode::IndirectReferences::MaxCount)
   {

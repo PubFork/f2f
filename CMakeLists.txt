@@ -40,6 +40,7 @@ source_group("format" FILES ${FORMAT_SOURCES})
 
 set(UTIL_SOURCES
   src/util/Algorithm.hpp 
+  src/util/Assert.hpp
   src/util/BitRange.hpp 
   src/util/StorageT.hpp
   src/util/FloorDiv.hpp 
@@ -64,7 +65,7 @@ set(SOURCES
   src/Directory.cpp 
   src/DirectoryIteratorImpl.hpp 
   src/DirectoryIterator.cpp 
-  src/Exception.hpp
+  src/FileSystemError.cpp 
 )
 
 source_group("sources" FILES ${SOURCES})
@@ -73,6 +74,7 @@ set(API_SOURCES
   include/f2f/Common.hpp
   include/f2f/Defs.hpp
   include/f2f/DirectoryIterator.hpp 
+  include/f2f/FileSystemError.hpp 
   include/f2f/FileSystem.hpp 
   include/f2f/FileDescriptor.hpp 
   include/f2f/IStorage.hpp 
@@ -117,8 +119,6 @@ source_group("test" FILES ${TEST_SOURCES})
 set(TEST_UTIL_SOURCES
   test/StorageInMemory.hpp 
   test/StorageInMemory.cpp 
-  test/SparseStorage.hpp 
-  test/SparseStorage.cpp 
 )
 
 source_group("util" FILES ${TEST_UTIL_SOURCES})
@@ -139,10 +139,15 @@ add_executable(f2f_unittest
   src/BlockStorage.cpp 
   src/FileBlocks.hpp 
   src/FileBlocks.cpp 
+  src/FileSystemError.cpp 
   src/File.hpp 
   src/File.cpp 
   src/Directory.hpp 
   src/Directory.cpp 
+)
+
+target_compile_definitions(f2f_unittest
+  PRIVATE F2F_API_EXPORTS
 )
 
 target_include_directories(f2f_unittest
@@ -160,6 +165,7 @@ endif()
 set(API_TEST_SOURCES
   test/FileSystem_test.cpp 
   test/FileSystem_load_test.cpp 
+  test/FileSystem_huge_test.cpp 
 )
 
 source_group("test" FILES ${API_TEST_SOURCES})

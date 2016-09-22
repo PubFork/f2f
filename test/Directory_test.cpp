@@ -37,15 +37,17 @@ TEST(Directory, CheckCollisionPairs)
       f2f::util::HashFNV1a_32(p.second.data(), p.second.data() + p.second.size()));
 }
 
-TEST(Directory, T1)
+TEST(Directory, RandomFillSlow)
 {
   std::minstd_rand random_engine;
-
-  for(int repeat = 0; repeat < 100; ++repeat)
+  static const int RepeatCount = 3;
+  for(int repeat = 0; repeat < RepeatCount; ++repeat)
   {
+    std::cout << "Pass " << (repeat + 1) << " of " << RepeatCount << std::endl;
     StorageInMemory storage;
     std::unique_ptr<f2f::BlockStorage> blockStorage(new f2f::BlockStorage(storage, true));
-    std::unique_ptr<f2f::Directory> directory(new f2f::Directory(*blockStorage, f2f::Directory::NoParentDirectory));
+    std::unique_ptr<f2f::Directory> directory(
+      new f2f::Directory(*blockStorage, f2f::Directory::NoParentDirectory, f2f::Directory::create_tag()));
   
     {
       f2f::Directory::Iterator it(*directory);
@@ -60,7 +62,7 @@ TEST(Directory, T1)
 
     for(int i = 0; i < 500'000; ++i)
     {
-      if (i%10000 == 0)
+      if (i%100000 == 0)
         std::cout << i << std::endl;
       std::string name;
       auto collision_val = collision_dist(random_engine);
@@ -83,6 +85,7 @@ TEST(Directory, T1)
 
       if (collision_dist(random_engine) < 100)
       {
+        // Reload storage
         auto inodeIndex = directory->inodeAddress();
         directory.reset();
 
@@ -112,6 +115,4 @@ TEST(Directory, T1)
       EXPECT_EQ(item.second, res->first.index());
     }
   }
-  /*directory.clear();
-  EXPECT_EQ(original_storage_size, storage.data().size());*/
 }

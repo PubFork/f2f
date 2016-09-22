@@ -1,7 +1,7 @@
 #define _ITERATOR_DEBUG_ARRAY_OVERLOADS 0 // For MSVC
 
 #include "Directory.hpp"
-#include "Exception.hpp"
+#include "util/Assert.hpp"
 #include "util/StorageT.hpp"
 #include "util/FNVHash.hpp"
 #include "util/Algorithm.hpp"
@@ -246,7 +246,7 @@ boost::optional<format::DirectoryTreeChildNodeReference> Directory::insertInNode
   unsigned levelsRemain, format::DirectoryTreeChildNodeReference * children, 
   uint16_t & itemsCount, unsigned maxItemsCount, bool & isDirty)
 {
-  assert(levelsRemain > 0);
+  F2F_ASSERT(levelsRemain > 0);
 
   auto position = std::lower_bound(
     children + 1,
@@ -451,7 +451,7 @@ void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string
     inode = inodeAddress.index() | format::DirectoryTreeLeafItem::DirectoryFlag;
     break;
   default:
-    assert(false);
+    F2F_ASSERT(false);
     return;
   }
 
@@ -499,7 +499,7 @@ void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string
         m_inode.directReferences.dataSize,
         m_inode.directReferences.MaxDataSize,
         inodeIsDirty);
-      assert(newChildrenReferences.empty());
+      F2F_ASSERT(newChildrenReferences.empty());
     }
   }
   else
@@ -540,7 +540,7 @@ void Directory::addFile(BlockAddress inodeAddress, FileType fileType, utf8string
       m_inode.indirectReferences.itemsCount, 
       m_inode.indirectReferences.MaxCount,
       inodeIsDirty);
-    assert(!newChild);
+    F2F_ASSERT(!newChild);
   }
   if (inodeIsDirty)
     util::writeT(m_storage, m_inodeAddress, m_inode);
@@ -850,5 +850,10 @@ utf8string_t Directory::Iterator::currentName() const
 {
   return utf8string_t((*m_impl->iterator)->name, (*m_impl->iterator)->name + (*m_impl->iterator)->nameSize);
 }
+
+Directory::FileExistsError::FileExistsError(FileType fileType)
+  : runtime_error("File or directory with same name already exists in directory")
+  , m_fileType(fileType)
+{}
 
 }

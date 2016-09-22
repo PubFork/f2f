@@ -33,15 +33,18 @@ public:
   void removeRegularFile(BlockAddress const & inodeAddress);
   void removeDirectory(BlockAddress const & inodeAddress);
 
+  // Invalidates iterators of this directory
+  void directoryModified(BlockAddress const & inodeAddress);
+
   struct IteratedDirectory
   {
     IteratedDirectory()
       : refCount(0)
-      ,directoryIsDeleted(false)
+      , version(0)
     {}
 
     unsigned refCount;
-    bool directoryIsDeleted;
+    unsigned version;
   };
 
   std::map<BlockAddress,IteratedDirectory> m_iteratedDirectories;

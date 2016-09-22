@@ -47,6 +47,15 @@ public:
     std::unique_ptr<Impl> m_impl;
   };
 
+  struct FileExistsError : public std::runtime_error
+  {
+    explicit FileExistsError(FileType fileType);
+    FileType fileType() const { return m_fileType; }
+
+  private:
+    FileType m_fileType;
+  };
+
   // Diagnostics
   void check() const;
 

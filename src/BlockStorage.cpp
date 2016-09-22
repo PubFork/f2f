@@ -1,9 +1,9 @@
 #include "BlockStorage.hpp"
 #include <limits>
+#include "util/Assert.hpp"
 #include "util/BitRange.hpp"
 #include "util/StorageT.hpp"
 #include "format/Common.hpp"
-#include "Exception.hpp"
 
 namespace f2f
 {
@@ -103,10 +103,9 @@ uint64_t BlockStorage::getBlocksCountByStorageSize(uint64_t size)
     blocksCount += groupsCount * OccupancyGroupLevels.blocksInLevel[level];
     if (level == 0)
     {
-      if (size > 0
+      F2F_FORMAT_ASSERT(!(size > 0
         && (size < format::OccupancyBlockSize
-          || (size - format::OccupancyBlockSize) % format::AddressableBlockSize != 0))
-        F2F_THROW_INVALID_FORMAT("Incorrect file size");
+          || (size - format::OccupancyBlockSize) % format::AddressableBlockSize != 0)));
       if (size > 0)
         blocksCount += (size - format::OccupancyBlockSize) / format::AddressableBlockSize;
     }
@@ -152,7 +151,7 @@ void BlockStorage::allocateBlocks(uint64_t numBlocks, std::function<void(BlockAd
     if (m_storageHeader.occupiedBlocksCount + numBlocks >= OccupancyGroupLevels.blocksInLevel[OccupancyGroupLevels.LevelsCount - 1])
       // It's not the format limitation, but the current implementation. 
       // When top-level handling will be improved this limitation can be removed.
-      throw std::runtime_error("BlockStorage size limit exceeded");
+      throw FileSystemError(ErrorCode::StorageLimitReached, "BlockStorage size limit exceeded");
 
     m_storage.resize(getSizeForNBlocks(m_storageHeader.occupiedBlocksCount + numBlocks));
     m_blocksCount = m_storageHeader.occupiedBlocksCount + numBlocks;
@@ -257,8 +256,8 @@ bool BlockStorage::markBlocksAsFree(uint64_t beginBlockInGroup, uint64_t endBloc
 {
   if (level == 0)
   {
-    assert(beginBlockInGroup <= endBlockInGroup);
-    assert(endBlockInGroup < format::OccupancyBlock::BitmapItemsCount);
+    F2F_ASSERT(beginBlockInGroup <= endBlockInGroup);
+    F2F_ASSERT(endBlockInGroup < format::OccupancyBlock::BitmapItemsCount);
     if (absoluteOffset < m_storage.size() - sizeof(format::StorageHeader))
     {
       format::OccupancyBlock block;
@@ -276,8 +275,8 @@ bool BlockStorage::markBlocksAsFree(uint64_t beginBlockInGroup, uint64_t endBloc
     bool blockIsDirty = false;
     uint64_t beginSubGroup = beginBlockInGroup / OccupancyGroupLevels.blocksInLevel[level - 1];
     uint64_t endSubGroup = endBlockInGroup / OccupancyGroupLevels.blocksInLevel[level - 1];
-    assert(beginSubGroup <= endSubGroup);
-    assert(endSubGroup < format::OccupancyBlock::BitmapItemsCount);
+    F2F_ASSERT(beginSubGroup <= endSubGroup);
+    F2F_ASSERT(endSubGroup < format::OccupancyBlock::BitmapItemsCount);
     for(uint64_t subGroup = beginSubGroup; subGroup <= endSubGroup; ++subGroup)
     {
       uint64_t beginBlockInSubGroup = 0;
@@ -312,8 +311,7 @@ void BlockStorage::releaseBlocks(BlockAddress blockAddress, unsigned numBlocks)
 {
   auto blockIndex = blockAddress.index();
 
-  if (blockIndex + numBlocks > m_blocksCount)
-    throw std::runtime_error("Expectation fail: Invalid argument");
+  F2F_ASSERT(blockIndex + numBlocks <= m_blocksCount);
 
   uint64_t endBlockIndex;
   if (blockIndex + numBlocks == m_blocksCount)

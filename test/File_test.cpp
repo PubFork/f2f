@@ -5,7 +5,6 @@
 #include <random>
 #include "File.hpp"
 #include "StorageInMemory.hpp"
-#include "SparseStorage.hpp"
 #include "util/StorageT.hpp"
 
 TEST(File, NoRemains1)
@@ -38,15 +37,10 @@ TEST_P(FileRemainsTest, NoRemains2)
   const unsigned CheckPeriod = SizeLimit / MaxFileSize / 10;
 
   std::unique_ptr<f2f::IStorage> storage;
-  if (SizeLimit < 1'000'000'000)
   {
     std::unique_ptr<StorageInMemory> mstorage(new StorageInMemory);
     mstorage->data().reserve(SizeLimit * 1.10);
     storage = std::move(mstorage);
-  }
-  else
-  {
-    storage.reset(new SparseStorage);
   }
 
   f2f::BlockStorage blockStorage(*storage, true);
@@ -104,7 +98,6 @@ INSTANTIATE_TEST_CASE_P(FileTest,
     std::make_pair(1, UINT64_C(100'000'000)),
     std::make_pair(2, UINT64_C(100'000'000)),
     std::make_pair(3, UINT64_C(100'000'000)),
-    std::make_pair(10, UINT64_C(100'000'000)),
-    std::make_pair(3, UINT64_C(100'000'000'000'000)) // 100 TB
+    std::make_pair(10, UINT64_C(100'000'000))
   )
 );

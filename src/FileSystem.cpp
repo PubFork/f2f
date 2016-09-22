@@ -1,8 +1,8 @@
 #include "FileSystemImpl.hpp"
 #include "Directory.hpp"
 #include "DirectoryIteratorImpl.hpp"
-#include "Exception.hpp"
 #include "File.hpp"
+#include "util/Assert.hpp"
 
 namespace f2f
 {
@@ -16,7 +16,7 @@ namespace
   inline void CheckFileNameSize(std::string const & name)
   {
     if (name.size() > MaxFileName)
-      throw std::logic_error("Name of file exceed size limit");
+      throw FileSystemError(ErrorCode::FileNameExceedsLimit, "Name of file exceeds size limit");
   }
 }
 
@@ -71,6 +71,7 @@ FileDescriptor FileSystem::open(const char * pathStr, OpenMode openMode, bool cr
     {
       std::unique_ptr<File> file(new File(m_impl->ptr->m_blockStorage));
       directory.addFile(file->inodeAddress(), FileType::Regular, fileName);
+      m_impl->ptr->directoryModified(directory.inodeAddress());
       return m_impl->ptr->openFile(file->inodeAddress(), openMode, std::move(file));
     }
     else
@@ -114,7 +115,7 @@ void FileSystem::createDirectory(const char * pathStr)
 
   boost::optional<std::pair<BlockAddress,FileType>> parentDirectory = m_impl->ptr->searchFile(path.parent_path());
   if (!parentDirectory || parentDirectory->second != FileType::Directory)
-    throw std::runtime_error("Can't find path to the directory");
+    throw FileSystemError(ErrorCode::PathNotFound, "Can't find path to the directory");
 
   std::string fileName = path.filename().generic_string();
   if (fileName == ".." || fileName == ".")
@@ -127,12 +128,13 @@ void FileSystem::createDirectory(const char * pathStr)
   try
   {
     directory.addFile(newDirectory.inodeAddress(), FileType::Directory, fileName);
+    m_impl->ptr->directoryModified(directory.inodeAddress());
   }
-  catch (FileExistsError const & e)
+  catch (Directory::FileExistsError const & e)
   {
     newDirectory.remove([](BlockAddress, FileType){});
     if (e.fileType() != FileType::Directory)
-      throw std::runtime_error("Can't create directory. File with same name already exists");
+      throw FileSystemError(ErrorCode::FileExists, "Can't create directory. File with same name already exists");
   }
 }
 
@@ -145,7 +147,7 @@ void FileSystem::remove(const char * pathStr)
   // Check that all elements of path are valid
   boost::optional<std::pair<BlockAddress, FileType>> target = m_impl->ptr->searchFile(path);
   if (!target)
-    throw std::runtime_error("Can't find path to remove");
+    throw FileSystemError(ErrorCode::PathNotFound, "Can't find path to remove");
 
   // Simplify path
   std::vector<std::string> names;
@@ -166,7 +168,7 @@ void FileSystem::remove(const char * pathStr)
   }
 
   if (names.empty())
-    throw std::runtime_error("Can't remove root directory");
+    throw FileSystemError(ErrorCode::CantRemoveRootDirectory, "Can't remove root directory");
   
   BlockAddress currentDirectoryAddress = RootDirectoryAddress;
   for (auto pathElementIt = names.begin(); pathElementIt != --names.end(); ++pathElementIt)
@@ -184,6 +186,7 @@ void FileSystem::remove(const char * pathStr)
   Directory parentDirectory(m_impl->ptr->m_blockStorage, currentDirectoryAddress);
   boost::optional<std::pair<BlockAddress, FileType>> removedItem = parentDirectory.removeFile(names.back());
   F2F_FORMAT_ASSERT(removedItem);
+  m_impl->ptr->directoryModified(parentDirectory.inodeAddress());
   switch (removedItem->second)
   {
   case FileType::Regular:
@@ -201,14 +204,18 @@ DirectoryIterator FileSystem::directoryIterator(const char * pathStr) const
 
   boost::optional<std::pair<BlockAddress, FileType>> target = m_impl->ptr->searchFile(path);
   if (!target || target->second != FileType::Directory)
-    throw std::runtime_error("Can't find directory");
+    throw FileSystemError(ErrorCode::PathNotFound, "Can't find directory");
 
   auto iteratedDirectoryIt = m_impl->ptr->m_iteratedDirectories.insert(
     std::make_pair(target->first, FileSystemImpl::IteratedDirectory())).first;
   ++iteratedDirectoryIt->second.refCount;
+  auto currentDirVersion = iteratedDirectoryIt->second.version;
   std::unique_ptr<DirectoryIteratorImpl> it(
-    new DirectoryIteratorImpl(m_impl->ptr, pathStr, target->first, iteratedDirectoryIt->second.directoryIsDeleted, 
-      [iteratedDirectoryIt, this]{
+    new DirectoryIteratorImpl(m_impl->ptr, pathStr, target->first, 
+      [iteratedDirectoryIt, currentDirVersion]() -> bool {
+        return iteratedDirectoryIt->second.version == currentDirVersion;
+      },
+      [iteratedDirectoryIt, this] {
         if (--iteratedDirectoryIt->second.refCount == 0)
           m_impl->ptr->m_iteratedDirectories.erase(iteratedDirectoryIt);
       }));
@@ -250,14 +257,15 @@ FileSystemImpl::FileSystemImpl(std::unique_ptr<IStorage> && storage, bool format
   if (format)
   {
     Directory root(m_blockStorage, Directory::NoParentDirectory, Directory::create_tag());
-    assert(root.inodeAddress() == RootDirectoryAddress);
+    F2F_ASSERT(root.inodeAddress() == RootDirectoryAddress);
   }
 }
 
 void FileSystemImpl::requiresReadWriteMode()
 {
   if (m_openMode == OpenMode::ReadOnly)
-    throw OpenModeError("Operation can't be performed: storage is in in read-only mode ");
+    throw FileSystemError(ErrorCode::OperationRequiresWriteAccess, 
+      "Operation can't be performed: storage is opened in read-only mode");
 }
 
 boost::optional<std::pair<BlockAddress, FileType>> FileSystemImpl::searchFile(fs::path const & path)
@@ -297,7 +305,7 @@ FileDescriptor FileSystemImpl::openFile(BlockAddress const & inodeAddress, OpenM
   if (record.refCount > 0)
   {
     if (openMode == OpenMode::ReadWrite || record.openMode == OpenMode::ReadWrite)
-      throw std::runtime_error("File is locked");
+      throw FileSystemError(ErrorCode::FileLocked, "File is locked");
   }
 
   if (!file)
@@ -342,9 +350,7 @@ void FileSystemImpl::removeDirectory(BlockAddress const & inodeAddress)
 {
   for(std::vector<BlockAddress> directories(1, inodeAddress); !directories.empty(); )
   {
-    auto iteratedDirectory = m_iteratedDirectories.find(directories.back());
-    if (iteratedDirectory != m_iteratedDirectories.end())
-      iteratedDirectory->second.directoryIsDeleted = true;
+    directoryModified(directories.back());
 
     Directory directory(m_blockStorage, directories.back());
     directories.pop_back();
@@ -362,6 +368,13 @@ void FileSystemImpl::removeDirectory(BlockAddress const & inodeAddress)
         }
       });
   }
+}
+
+void FileSystemImpl::directoryModified(BlockAddress const & inodeAddress)
+{
+  auto iteratedDirectory = m_iteratedDirectories.find(inodeAddress);
+  if (iteratedDirectory != m_iteratedDirectories.end())
+    ++iteratedDirectory->second.version;
 }
 
 }

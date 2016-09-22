@@ -1,4 +1,5 @@
 #include "DirectoryIteratorImpl.hpp"
+#include "f2f/FileSystemError.hpp"
 
 namespace f2f
 {
@@ -83,8 +84,8 @@ bool DirectoryIterator::operator!=(DirectoryIterator const & rhs) const
 DirectoryIterator & DirectoryIterator::operator++()
 {
   if (!m_impl || m_impl->ptr->m_iterator.eof())
-    throw std::runtime_error("Incrementing end directory iterator");
-  if (m_impl->ptr->m_directoryIsDeleted)
+    throw FileSystemError(ErrorCode::IncorrectIteratorAccess, "Incrementing end directory iterator");
+  if (!m_impl->ptr->m_isIteratorValid())
   {
     delete m_impl;
     m_impl = nullptr;
@@ -97,14 +98,14 @@ DirectoryIterator & DirectoryIterator::operator++()
 const DirectoryEntry & DirectoryIterator::operator*() const
 {
   if (!m_impl || m_impl->ptr->m_iterator.eof())
-    throw std::runtime_error("Dereferencing end directory iterator");
+    throw FileSystemError(ErrorCode::IncorrectIteratorAccess, "Dereferencing end directory iterator");
   return m_impl->ptr->m_entry;
 }
 
 const DirectoryEntry * DirectoryIterator::operator->() const
 {
   if (!m_impl || m_impl->ptr->m_iterator.eof())
-    throw std::runtime_error("Dereferencing end directory iterator");
+    throw FileSystemError(ErrorCode::IncorrectIteratorAccess, "Dereferencing end directory iterator");
   return &m_impl->ptr->m_entry;
 }
 
@@ -112,13 +113,13 @@ DirectoryIteratorImpl::DirectoryIteratorImpl(
   std::shared_ptr<FileSystemImpl> const & owner,
   std::string const & directoryPath,
   BlockAddress const & inodeAddress,
-  bool & directoryIsDeleted,
+  std::function<bool()> const & isIteratorValid,
   std::function<void()> const & onFinishIteration)
   : m_owner(owner)
   , m_directoryPath(directoryPath)
   , m_directory(owner->m_blockStorage, inodeAddress)
   , m_iterator(m_directory)
-  , m_directoryIsDeleted(directoryIsDeleted)
+  , m_isIteratorValid(isIteratorValid)
   , m_onFinishIteration(onFinishIteration)
   , m_entry(*this)
 {}
